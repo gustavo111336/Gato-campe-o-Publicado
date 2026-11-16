@@ -143,6 +143,13 @@ data class GameUiState(
   val multiplayerPlayerCount: Int = 0,
   val multiplayerMaxPlayers: Int = 100,
   val multiplayerRole: String = "cat",
+  val isSecretMode: Boolean = false,
+  val isLocalPlayerAlive: Boolean = true,
+  val eliminatedUserIds: Set<String> = emptySet(),
+  val secretKillCooldownRatio: Float = 0f,
+  val secretKillCooldownSec: Float = 0f,
+  val nearestKillTargetUid: String? = null,
+  val nearestKillTargetName: String? = null,
   val roomWinnerUsername: String? = null,
   val notificationFeedback: String? = null,
   // Dialogs
@@ -1218,10 +1225,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
   private fun captureCurrentReplayFrame(elapsedSec: Float) {
     val ghosts = engine.snapshotGhosts()
-    val g1 = ghosts.getOrNull(0)?.position ?: Vector2D(800f, 400f)
+    val g1 = ghosts.getOrNull(0)?.position ?: Vector2D(1600f, 800f)
     val g2 = ghosts.getOrNull(1)?.position
     val g3 = ghosts.getOrNull(2)?.position
-    val c = engine.activeCollectible?.position ?: Vector2D(800f, 800f)
+    val c = engine.activeCollectible?.position ?: Vector2D(1600f, 1600f)
     val anyFleeing = !engine.isPlayerGhost && ghosts.any { it.isFleeing || it.freezeTimerSec > 0f }
     val sonicActive = engine.snapshotShockwaves().isNotEmpty()
 
@@ -1374,7 +1381,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     myRole: String,
     maxPlayers: Int,
     winnerUsername: String?,
-    leftPlayerMessage: String? = null
+    leftPlayerMessage: String? = null,
+    isSecretMode: Boolean = false,
+    eliminatedIds: Set<String> = emptySet(),
+    isMeetingPaused: Boolean = false
   ) {
     val others = players.filter { it.userId != myUserId }.map { p ->
       RemotePartnerState(
@@ -1382,15 +1392,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         username = p.username.ifBlank { "Jogador" },
         position = Vector2D(p.x.toFloat(), p.y.toFloat()),
         score = p.score.toInt(),
-        role = p.role.ifBlank { "cat" },
+        role = if (isSecretMode) "cat" else p.role.ifBlank { "cat" },
         skinId = p.skinId.ifBlank { "classic_orange" }
       )
     }
+    val localAlive = roomCode == null || !eliminatedIds.contains(myUserId)
     engine.setMultiplayerParticipants(
       active = roomCode != null,
       myRole = myRole,
       players = others,
-      captureGoal = 3
+      captureGoal = 3,
+      secretMode = isSecretMode,
+      localAlive = localAlive,
+      eliminatedIds = eliminatedIds,
+      pausedByMeeting = isMeetingPaused
     )
     val topPartner = others.maxByOrNull { it.score } ?: others.firstOrNull()
     _uiState.value = _uiState.value.copy(
@@ -1400,12 +1415,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       multiplayerPlayerCount = players.size,
       multiplayerMaxPlayers = maxPlayers,
       multiplayerRole = myRole,
+      isSecretMode = roomCode != null && isSecretMode,
+      isLocalPlayerAlive = localAlive,
+      eliminatedUserIds = eliminatedIds,
       roomWinnerUsername = winnerUsername,
       isPlayerGhost = engine.isPlayerGhost
     )
     if (!leftPlayerMessage.isNullOrBlank()) {
       showTransientFeedback(leftPlayerMessage)
     }
+  }
+
+  fun onSecretKillExecuted(victimName: String, victimUid: String) {
+    val pos = engine.snapshotRemotePlayers().find { it.userId == victimUid }?.position ?: engine.heroPosition
+    engine.triggerSecretKillFeedback(victimName, pos)
   }
 
   fun exportCloudSavePayload(): CloudSavePayload {
@@ -1618,12 +1641,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           }
         }
 
+        val remoteAlive = engine.snapshotRemotePlayers().filter {
+          !engine.eliminatedUserIds.contains(it.userId)
+        }
         val minGhostDist = if (engine.isPlayerGhost) {
           engine.snapshotAiRunnerCat()?.let { (it.position - engine.heroPosition).length() }
-            ?: engine.snapshotRemotePlayers().minOfOrNull { (it.position - engine.heroPosition).length() }
+            ?: remoteAlive.minOfOrNull { (it.position - engine.heroPosition).length() }
             ?: 9999f
         } else {
           engine.snapshotGhosts().minOfOrNull { (it.position - engine.heroPosition).length() } ?: 9999f
+        }
+        val nearestKillTarget = if (engine.isSecretMode && engine.isPlayerGhost && engine.localPlayerAlive) {
+          remoteAlive
+            .filter { (it.position - engine.heroPosition).length() <= 240f }
+            .minByOrNull { (it.position - engine.heroPosition).length() }
+        } else {
+          null
         }
         val anyFleeing = if (engine.isPlayerGhost) false else engine.snapshotGhosts().all { it.isFleeing || it.freezeTimerSec > 0f }
         val isNear = !engine.isPlayerGhost && minGhostDist < 320f && !anyFleeing && !engine.isEffectivelyGodMode && !engine.isEffectivelyInvisible
@@ -1639,6 +1672,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           leadingBotCats = leaderBotCats,
           winnerBotName = engine.winnerBotName,
           isPlayerGhost = engine.isPlayerGhost,
+          isSecretMode = engine.isSecretMode,
+          isLocalPlayerAlive = engine.localPlayerAlive,
+          eliminatedUserIds = engine.eliminatedUserIds,
+          secretKillCooldownRatio = (engine.secretKillCooldownTimer / engine.secretKillCooldown).coerceIn(0f, 1f),
+          secretKillCooldownSec = engine.secretKillCooldownTimer.coerceAtLeast(0f),
+          nearestKillTargetUid = nearestKillTarget?.userId?.takeIf { it.isNotBlank() },
+          nearestKillTargetName = nearestKillTarget?.username?.takeIf { it.isNotBlank() },
           aiRunnerLives = engine.aiRunnerCat?.lives ?: 0,
           aiRunnerCats = engine.aiRunnerCat?.catsCollected ?: 0,
           catsCollected = engine.catsCollected,

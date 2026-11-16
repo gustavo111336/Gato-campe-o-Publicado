@@ -87,6 +87,7 @@ service cloud.firestore {
              data.isPublic is bool &&
              data.status in ['waiting', 'playing', 'finished'] &&
              data.difficulty in ['NORMAL', 'CALMO', 'DESAFIO', 'ELITE'] &&
+             data.isSecretMode is bool &&
              data.maxPlayers is int &&
              data.maxPlayers >= 2 &&
              data.maxPlayers <= 200 &&
@@ -107,19 +108,19 @@ service cloud.firestore {
              data.guestUsername.size() <= 24 &&
              data.hostX is number &&
              data.hostX >= 0 &&
-             data.hostX <= 2000 &&
+             data.hostX <= 5000 &&
              data.hostY is number &&
              data.hostY >= 0 &&
-             data.hostY <= 3000 &&
+             data.hostY <= 6000 &&
              data.hostScore is int &&
              data.hostScore >= 0 &&
              data.hostScore <= 9999 &&
              data.guestX is number &&
              data.guestX >= 0 &&
-             data.guestX <= 2000 &&
+             data.guestX <= 5000 &&
              data.guestY is number &&
              data.guestY >= 0 &&
-             data.guestY <= 3000 &&
+             data.guestY <= 6000 &&
              data.guestScore is int &&
              data.guestScore >= 0 &&
              data.guestScore <= 9999 &&
@@ -130,6 +131,22 @@ service cloud.firestore {
              data.winnerUserId.size() <= 128 &&
              data.winnerUsername is string &&
              data.winnerUsername.size() <= 24 &&
+             data.meetingStatus in ['none', 'active', 'result'] &&
+             data.meetingCallerUid is string &&
+             data.meetingCallerUid.size() <= 128 &&
+             data.meetingCallerUsername is string &&
+             data.meetingCallerUsername.size() <= 24 &&
+             data.meetingRound is int &&
+             data.meetingRound >= 0 &&
+             data.meetingRound <= 9999 &&
+             isValidCsvField(data.eliminatedUserIdsCsv) &&
+             data.lastBanishedUserId is string &&
+             data.lastBanishedUserId.size() <= 128 &&
+             data.lastBanishedUsername is string &&
+             data.lastBanishedUsername.size() <= 24 &&
+             data.lastBanishedWasImpostor is bool &&
+             data.meetingResultText is string &&
+             data.meetingResultText.size() <= 200 &&
              data.createdAt is timestamp &&
              data.createdAt <= request.time &&
              data.updatedAt is timestamp &&
@@ -145,10 +162,10 @@ service cloud.firestore {
              data.username.size() <= 24 &&
              data.x is number &&
              data.x >= 0 &&
-             data.x <= 2000 &&
+             data.x <= 5000 &&
              data.y is number &&
              data.y >= 0 &&
-             data.y <= 3000 &&
+             data.y <= 6000 &&
              data.score is int &&
              data.score >= 0 &&
              data.score <= 9999 &&
@@ -157,6 +174,12 @@ service cloud.firestore {
              data.skinId.size() <= 64 &&
              data.voteGhostForUid is string &&
              data.voteGhostForUid.size() <= 128 &&
+             data.isAlive is bool &&
+             data.banishVoteForUid is string &&
+             data.banishVoteForUid.size() <= 128 &&
+             data.banishVoteRound is int &&
+             data.banishVoteRound >= 0 &&
+             data.banishVoteRound <= 9999 &&
              data.updatedAt is timestamp &&
              data.updatedAt <= request.time;
     }
@@ -293,7 +316,8 @@ service cloud.firestore {
                     (resource == null ||
                      resource.data.hostUserId == request.auth.uid ||
                      resource.data.guestUserId == request.auth.uid ||
-                     resource.data.status in ['waiting', 'playing']);
+                     resource.data.status in ['waiting', 'playing'] ||
+                     exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid)));
 
       allow list: if isSignedIn() &&
                      ((resource.data.isPublic == true && resource.data.status in ['waiting', 'playing']) ||
@@ -312,19 +336,34 @@ service cloud.firestore {
                        incoming().winnerUsername == '' &&
                        incoming().hostScore == 0 &&
                        incoming().guestScore == 0 &&
+                       incoming().meetingStatus == 'none' &&
+                       incoming().meetingCallerUid == '' &&
+                       incoming().meetingCallerUsername == '' &&
+                       incoming().meetingRound == 0 &&
+                       incoming().eliminatedUserIdsCsv == '' &&
+                       incoming().lastBanishedUserId == '' &&
+                       incoming().lastBanishedUsername == '' &&
+                       incoming().lastBanishedWasImpostor == false &&
+                       incoming().meetingResultText == '' &&
                        incoming().keys().hasAll([
-                         'code', 'isPublic', 'status', 'difficulty', 'maxPlayers', 'playerCount',
+                         'code', 'isPublic', 'status', 'difficulty', 'isSecretMode', 'maxPlayers', 'playerCount',
                          'ghostPlayerUserId', 'hostUserId', 'hostUsername',
                          'guestUserId', 'guestUsername', 'hostX', 'hostY', 'hostScore',
                          'guestX', 'guestY', 'guestScore', 'targetCats', 'winnerUserId',
-                         'winnerUsername', 'createdAt', 'updatedAt'
+                         'winnerUsername', 'meetingStatus', 'meetingCallerUid', 'meetingCallerUsername',
+                         'meetingRound', 'eliminatedUserIdsCsv', 'lastBanishedUserId',
+                         'lastBanishedUsername', 'lastBanishedWasImpostor', 'meetingResultText',
+                         'createdAt', 'updatedAt'
                        ]) &&
                        incoming().keys().hasOnly([
-                         'code', 'isPublic', 'status', 'difficulty', 'maxPlayers', 'playerCount',
+                         'code', 'isPublic', 'status', 'difficulty', 'isSecretMode', 'maxPlayers', 'playerCount',
                          'ghostPlayerUserId', 'hostUserId', 'hostUsername',
                          'guestUserId', 'guestUsername', 'hostX', 'hostY', 'hostScore',
                          'guestX', 'guestY', 'guestScore', 'targetCats', 'winnerUserId',
-                         'winnerUsername', 'createdAt', 'updatedAt'
+                         'winnerUsername', 'meetingStatus', 'meetingCallerUid', 'meetingCallerUsername',
+                         'meetingRound', 'eliminatedUserIdsCsv', 'lastBanishedUserId',
+                         'lastBanishedUsername', 'lastBanishedWasImpostor', 'meetingResultText',
+                         'createdAt', 'updatedAt'
                        ]) &&
                        isValidRoom(incoming());
 
@@ -337,6 +376,7 @@ service cloud.firestore {
                        incoming().hostUsername == existing().hostUsername &&
                        incoming().isPublic == existing().isPublic &&
                        incoming().difficulty == existing().difficulty &&
+                       incoming().isSecretMode == existing().isSecretMode &&
                        incoming().maxPlayers == existing().maxPlayers &&
                        incoming().targetCats == existing().targetCats &&
                        incoming().createdAt == existing().createdAt &&
@@ -347,12 +387,15 @@ service cloud.firestore {
                           incoming().status in ['waiting', 'playing'] &&
                           incoming().winnerUserId == '' &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['guestUserId', 'guestUsername', 'playerCount', 'status', 'updatedAt'])) ||
-                         // Leaving or participant updating state, vote tally ghostPlayerUserId, or finishing match
+                         // Leaving or participant updating state, vote tally ghostPlayerUserId, secret meetings/eliminations, or finishing match
                          ((request.auth.uid == existing().hostUserId ||
                            request.auth.uid == existing().guestUserId ||
                            exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid))) &&
                           (incoming().status == existing().status ||
-                           (existing().status == 'playing' &&
+                           (existing().status == 'waiting' &&
+                            incoming().status == 'playing' &&
+                            incoming().winnerUserId == '') ||
+                           (existing().status in ['waiting', 'playing'] &&
                             incoming().status == 'finished' &&
                             incoming().winnerUserId != '') ||
                            (existing().status == 'playing' &&
@@ -361,6 +404,9 @@ service cloud.firestore {
                           incoming().diff(existing()).affectedKeys().hasOnly([
                             'hostX', 'hostY', 'hostScore', 'guestUserId', 'guestUsername',
                             'guestX', 'guestY', 'guestScore', 'playerCount', 'ghostPlayerUserId',
+                            'meetingStatus', 'meetingCallerUid', 'meetingCallerUsername',
+                            'meetingRound', 'eliminatedUserIdsCsv', 'lastBanishedUserId',
+                            'lastBanishedUsername', 'lastBanishedWasImpostor', 'meetingResultText',
                             'status', 'winnerUserId', 'winnerUsername', 'updatedAt'
                           ]))
                        );
@@ -375,8 +421,8 @@ service cloud.firestore {
                                  isValidId(playerId) &&
                                  request.auth.uid == playerId &&
                                  incoming().userId == playerId &&
-                                 incoming().keys().hasAll(['userId', 'username', 'x', 'y', 'score', 'role', 'skinId', 'voteGhostForUid', 'updatedAt']) &&
-                                 incoming().keys().hasOnly(['userId', 'username', 'x', 'y', 'score', 'role', 'skinId', 'voteGhostForUid', 'updatedAt']) &&
+                                 incoming().keys().hasAll(['userId', 'username', 'x', 'y', 'score', 'role', 'skinId', 'voteGhostForUid', 'isAlive', 'banishVoteForUid', 'banishVoteRound', 'updatedAt']) &&
+                                 incoming().keys().hasOnly(['userId', 'username', 'x', 'y', 'score', 'role', 'skinId', 'voteGhostForUid', 'isAlive', 'banishVoteForUid', 'banishVoteRound', 'updatedAt']) &&
                                  isValidRoomPlayer(incoming());
 
         allow delete: if isSignedIn() &&

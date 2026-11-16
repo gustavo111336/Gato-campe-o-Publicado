@@ -17,12 +17,20 @@ const [emulatorHost, emulatorPortStr] = (
 ).split(":");
 const emulatorPort = parseInt(emulatorPortStr, 10);
 
-function validRoomPayload(code, hostUid, isPublic = false, maxPlayers = 100, difficulty = "NORMAL") {
+function validRoomPayload(
+  code,
+  hostUid,
+  isPublic = false,
+  maxPlayers = 100,
+  difficulty = "NORMAL",
+  isSecretMode = false
+) {
   return {
     code,
     isPublic,
     status: "waiting",
     difficulty,
+    isSecretMode,
     maxPlayers,
     playerCount: 1,
     ghostPlayerUserId: "",
@@ -30,15 +38,24 @@ function validRoomPayload(code, hostUid, isPublic = false, maxPlayers = 100, dif
     hostUsername: "GatoHost",
     guestUserId: "",
     guestUsername: "",
-    hostX: 800,
-    hostY: 1400,
+    hostX: 1600,
+    hostY: 2200,
     hostScore: 0,
-    guestX: 800,
-    guestY: 1600,
+    guestX: 1600,
+    guestY: 2600,
     guestScore: 0,
     targetCats: 10,
     winnerUserId: "",
     winnerUsername: "",
+    meetingStatus: "none",
+    meetingCallerUid: "",
+    meetingCallerUsername: "",
+    meetingRound: 0,
+    eliminatedUserIdsCsv: "",
+    lastBanishedUserId: "",
+    lastBanishedUsername: "",
+    lastBanishedWasImpostor: false,
+    meetingResultText: "",
     createdAt: new Date(Date.now() - 1000),
     updatedAt: new Date(Date.now() - 1000),
   };
@@ -48,12 +65,15 @@ function validPlayerPayload(uid, username, role = "cat", vote = "") {
   return {
     userId: uid,
     username,
-    x: 800,
-    y: 1200,
+    x: 1600,
+    y: 2400,
     score: 0,
     role,
     skinId: "classic_orange",
     voteGhostForUid: vote,
+    isAlive: true,
+    banishVoteForUid: "",
+    banishVoteRound: 0,
     updatedAt: new Date(Date.now() - 500),
   };
 }
@@ -365,4 +385,92 @@ test("GameplayVideos recording posts can be created, watched/liked/commented by 
     aliceDb.collection("gameplayVideos").doc("vid_01").delete()
   );
 });
+
+test("Secret Mode supports expanded map coords, emergency meeting accusation votes, and banishment reveal", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("SEC999").set(validRoomPayload("SEC999", ALICE_UID, true, 50, "NORMAL", true))
+  );
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("SEC999").collection("players").doc(ALICE_UID).set(validPlayerPayload(ALICE_UID, "AliceCat"))
+  );
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("SEC999").collection("players").doc(BOB_UID).set(validPlayerPayload(BOB_UID, "BobCat"))
+  );
+  await assertSucceeds(
+    charlieDb.collection("rooms").doc("SEC999").collection("players").doc(CHARLIE_UID).set(validPlayerPayload(CHARLIE_UID, "CharlieCat"))
+  );
+
+  // Expanded map coordinates (3200 x 4800) succeed, out-of-bounds fail
+  await assertSucceeds(
+    bobDb.collection("rooms").doc("SEC999").collection("players").doc(BOB_UID).update({
+      x: 3100,
+      y: 4700,
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+  await assertFails(
+    bobDb.collection("rooms").doc("SEC999").collection("players").doc(BOB_UID).update({
+      x: 5500,
+      y: 4700,
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+
+  // Immutable isSecretMode cannot be flipped post-creation
+  await assertFails(
+    bobDb.collection("rooms").doc("SEC999").update({
+      isSecretMode: false,
+      updatedAt: new Date(Date.now() - 250),
+    })
+  );
+
+  // Assign ghost randomly & eliminate victim, then call emergency meeting & accuse votes
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("SEC999").update({
+      playerCount: 3,
+      status: "playing",
+      ghostPlayerUserId: CHARLIE_UID,
+      eliminatedUserIdsCsv: BOB_UID,
+      meetingStatus: "active",
+      meetingCallerUid: ALICE_UID,
+      meetingCallerUsername: "AliceCat",
+      meetingRound: 1,
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("SEC999").collection("players").doc(ALICE_UID).update({
+      banishVoteForUid: CHARLIE_UID,
+      banishVoteRound: 1,
+      updatedAt: new Date(Date.now() - 150),
+    })
+  );
+
+  // Banishing real ghost reveals impostor message and finishes room
+  await assertSucceeds(
+    aliceDb.collection("rooms").doc("SEC999").update({
+      status: "finished",
+      meetingStatus: "result",
+      eliminatedUserIdsCsv: `${BOB_UID},${CHARLIE_UID}`,
+      lastBanishedUserId: CHARLIE_UID,
+      lastBanishedUsername: "CharlieCat",
+      lastBanishedWasImpostor: true,
+      meetingResultText: "**CharlieCat** realmente era um impostor",
+      winnerUserId: ALICE_UID,
+      winnerUsername: "Gatos Campeões",
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
+
+  // 3rd participant (Charlie) can read the finished room reveal, while non-participant cannot
+  await assertSucceeds(charlieDb.collection("rooms").doc("SEC999").get());
+  const outsiderDb = testEnv.authenticatedContext("outsider_999").firestore();
+  await assertFails(outsiderDb.collection("rooms").doc("SEC999").get());
+});
+
 

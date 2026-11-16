@@ -191,43 +191,69 @@ class MainActivity : ComponentActivity() {
           null
         }
 
-        // Sync active multiplayer room players (supports 100+ players, instant leave alert, and Elite voting ghost role)
+        // Sync active multiplayer room players (supports 100+ players, instant leave alert, Elite voting & Secret Mode)
         var currentActiveRoomDiff by remember { mutableStateOf("NORMAL") }
-        if (activeUser != null && onlineVm != null) {
-          val activeRoom by onlineVm.activeRoom.collectAsStateWithLifecycle()
-          val roomPlayers by onlineVm.roomPlayersState.collectAsStateWithLifecycle()
-          val leftAlert by onlineVm.leftPlayerAlert.collectAsStateWithLifecycle()
+        val activeRoomState = onlineVm?.activeRoom?.collectAsStateWithLifecycle()?.value
+        val roomPlayersState = onlineVm?.roomPlayersState?.collectAsStateWithLifecycle()?.value ?: emptyList()
+        val leftAlertState = onlineVm?.leftPlayerAlert?.collectAsStateWithLifecycle()?.value
+        val onlineBusyState = onlineVm?.isBusy?.collectAsStateWithLifecycle()?.value ?: false
 
-          LaunchedEffect(activeRoom, roomPlayers, leftAlert, activeUser.uid) {
-            val room = activeRoom
+        if (activeUser != null && onlineVm != null) {
+          LaunchedEffect(activeRoomState, roomPlayersState, leftAlertState, activeUser.uid) {
+            val room = activeRoomState
             currentActiveRoomDiff = room?.difficulty ?: "NORMAL"
-            val myRole = if (room != null && room.difficulty == "ELITE" && room.ghostPlayerUserId == activeUser.uid) {
+            if (room != null && room.isSecretMode && room.ghostPlayerUserId.isBlank() && roomPlayersState.size >= 2) {
+              onlineVm.ensureSecretGhostAssigned()
+            }
+            val myRole = if (room != null && (room.difficulty == "ELITE" || room.isSecretMode) && room.ghostPlayerUserId == activeUser.uid) {
               "ghost"
             } else {
               "cat"
             }
+            val eliminatedIds = room?.eliminatedUserIdsCsv
+              ?.split(",")
+              ?.map { it.trim() }
+              ?.filter { it.isNotBlank() }
+              ?.toSet() ?: emptySet()
+            val isMeetingPaused = room != null && (room.meetingStatus == "active" || room.meetingStatus == "result")
+
             viewModel.updateMultiplayerPlayers(
               roomCode = room?.code,
-              players = roomPlayers,
+              players = roomPlayersState,
               myUserId = activeUser.uid,
               myRole = myRole,
               maxPlayers = room?.maxPlayers?.toInt() ?: 100,
               winnerUsername = room?.winnerUsername?.takeIf { it.isNotBlank() },
-              leftPlayerMessage = leftAlert
+              leftPlayerMessage = leftAlertState,
+              isSecretMode = room?.isSecretMode ?: false,
+              eliminatedIds = eliminatedIds,
+              isMeetingPaused = isMeetingPaused
             )
-            if (leftAlert != null) {
+            if (leftAlertState != null) {
               onlineVm.consumeLeftPlayerAlert()
             }
           }
 
-          val roomCode = activeRoom?.code
+          val roomCode = activeRoomState?.code
           val isPlaying = uiState.gameStatus == GameStatus.PLAYING || uiState.gameStatus == GameStatus.VICTORY
-          LaunchedEffect(roomCode, isPlaying, uiState.gameStatus, uiState.selectedSkinId, activeRoom?.ghostPlayerUserId, activeRoom?.difficulty) {
-            val room = activeRoom
-            if (roomCode != null && isPlaying && room != null) {
-              while (isActive && activeRoom != null && activeRoom?.status != "finished") {
+          LaunchedEffect(
+            roomCode,
+            isPlaying,
+            uiState.gameStatus,
+            uiState.selectedSkinId,
+            activeRoomState?.status,
+            activeRoomState?.ghostPlayerUserId,
+            activeRoomState?.difficulty,
+            activeRoomState?.isSecretMode,
+            activeRoomState?.eliminatedUserIdsCsv
+          ) {
+            val room = activeRoomState
+            if (roomCode != null && isPlaying && room != null && room.status != "finished") {
+              while (isActive) {
                 val won = uiState.gameStatus == GameStatus.VICTORY
-                val role = if (activeRoom?.difficulty == "ELITE" && activeRoom?.ghostPlayerUserId == activeUser.uid) {
+                val role = if (room.isSecretMode) {
+                  "cat"
+                } else if (room.difficulty == "ELITE" && room.ghostPlayerUserId == activeUser.uid) {
                   "ghost"
                 } else {
                   "cat"
@@ -319,6 +345,17 @@ class MainActivity : ComponentActivity() {
               },
               onToggleRecord = {
                 viewModel.toggleRecordingGameplay()
+              },
+              onReportMeeting = {
+                onlineVm?.callMeeting()
+              },
+              onSecretKill = {
+                val targetUid = uiState.nearestKillTargetUid
+                val targetName = uiState.nearestKillTargetName
+                if (targetUid != null && targetName != null && uiState.secretKillCooldownRatio <= 0.01f) {
+                  viewModel.onSecretKillExecuted(targetName, targetUid)
+                  onlineVm?.killSecretVictim(targetUid, targetName)
+                }
               }
             )
 
@@ -513,6 +550,33 @@ class MainActivity : ComponentActivity() {
                   viewModel.startNormalGame()
                 },
                 onDismiss = { viewModel.openOnlineDialog(false) }
+              )
+            }
+
+            if (activeUser != null && onlineVm != null && activeRoomState != null &&
+              (activeRoomState.meetingStatus == "active" || activeRoomState.meetingStatus == "result")
+            ) {
+              LaunchedEffect(activeRoomState.meetingStatus) {
+                viewModel.inputVector = Vector2D(0f, 0f)
+              }
+              SecretMeetingDialog(
+                room = activeRoomState,
+                roomPlayers = roomPlayersState,
+                currentUserId = activeUser.uid,
+                isBusy = onlineBusyState,
+                onVoteTarget = { targetUidOrSkip ->
+                  onlineVm.castBanishVote(targetUidOrSkip, uiState.selectedSkinId)
+                },
+                onResolveMeeting = {
+                  onlineVm.resolveMeeting()
+                },
+                onContinueAfterResult = {
+                  onlineVm.dismissMeetingResult()
+                },
+                onLeaveToLobby = {
+                  viewModel.returnToMenu()
+                  viewModel.openOnlineDialog(true, OnlineLobbyTab.ROOMS)
+                }
               )
             }
 

@@ -472,6 +472,7 @@ private fun RoomsTabContent(
   var joinCodeInput by remember { mutableStateOf("") }
   var selectedMaxPlayers by remember { mutableIntStateOf(100) }
   var selectedRoomDifficulty by remember { mutableStateOf("NORMAL") }
+  var selectedSecretMode by remember { mutableStateOf(false) }
 
   if (activeRoom != null) {
     ActiveRoomCard(
@@ -496,6 +497,7 @@ private fun RoomsTabContent(
         wins = uiState.championCount,
         maxPlayers = selectedMaxPlayers,
         difficulty = selectedRoomDifficulty,
+        isSecretMode = selectedSecretMode,
         skinId = uiState.selectedSkinId
       )
     },
@@ -590,6 +592,51 @@ private fun RoomsTabContent(
           )
         }
       }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Surface(
+        onClick = { selectedSecretMode = !selectedSecretMode },
+        shape = RoundedCornerShape(12.dp),
+        color = if (selectedSecretMode) Color(0xFF450A0A) else Color(0xFF1E293B),
+        border = BorderStroke(
+          width = if (selectedSecretMode) 1.5.dp else 1.dp,
+          color = if (selectedSecretMode) Color(0xFFEF4444) else Color(0xFF334155)
+        ),
+        modifier = Modifier
+          .fillMaxWidth()
+          .defaultMinSize(minHeight = 48.dp)
+          .testTag("secret_mode_toggle")
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+              text = "🕵️ Modo Secreto (1 Fantasma Disfarçado)",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Black,
+              color = if (selectedSecretMode) Color(0xFFFCA5A5) else Color.White
+            )
+            Text(
+              text = "1 jogador aleatório vira Fantasma disfarçado de humano, pode matar e todos podem denunciar para votar e banir!",
+              fontSize = 10.sp,
+              color = Color(0xFFCBD5E1),
+              lineHeight = 13.sp
+            )
+          }
+          Switch(
+            checked = selectedSecretMode,
+            onCheckedChange = { selectedSecretMode = it },
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color.White,
+              checkedTrackColor = Color(0xFFDC2626)
+            )
+          )
+        }
+      }
     }
   }
 
@@ -608,6 +655,7 @@ private fun RoomsTabContent(
           wins = uiState.championCount,
           maxPlayers = selectedMaxPlayers,
           difficulty = selectedRoomDifficulty,
+          isSecretMode = selectedSecretMode,
           skinId = uiState.selectedSkinId
         )
       },
@@ -630,6 +678,7 @@ private fun RoomsTabContent(
           wins = uiState.championCount,
           maxPlayers = selectedMaxPlayers,
           difficulty = selectedRoomDifficulty,
+          isSecretMode = selectedSecretMode,
           skinId = uiState.selectedSkinId
         )
       },
@@ -736,7 +785,7 @@ private fun RoomsTabContent(
               ) {
                 Column(modifier = Modifier.weight(1f)) {
                   Text(
-                    text = "🐱 @${publicRoom.hostUsername} • ${publicRoom.difficulty}",
+                    text = "🐱 @${publicRoom.hostUsername} • ${publicRoom.difficulty}${if (publicRoom.isSecretMode) " • 🕵️ Secreto" else ""}",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -783,6 +832,14 @@ private fun ActiveRoomCard(
   onLeaveRoom: () -> Unit
 ) {
   val isElite = room.difficulty == "ELITE"
+  val isSecret = room.isSecretMode
+  val eliminatedSet = remember(room.eliminatedUserIdsCsv) {
+    room.eliminatedUserIdsCsv
+      .split(",")
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+      .toSet()
+  }
   val voteCounts = remember(roomPlayers) {
     roomPlayers.mapNotNull { it.voteGhostForUid.takeIf { uid -> uid.isNotBlank() } }
       .groupingBy { it }
@@ -794,7 +851,14 @@ private fun ActiveRoomCard(
   Surface(
     shape = RoundedCornerShape(16.dp),
     color = Color(0xFF1E1B4B),
-    border = BorderStroke(2.dp, if (isElite) Color(0xFFC084FC) else Color(0xFFFACC15)),
+    border = BorderStroke(
+      2.dp,
+      when {
+        isSecret -> Color(0xFFEF4444)
+        isElite -> Color(0xFFC084FC)
+        else -> Color(0xFFFACC15)
+      }
+    ),
     modifier = Modifier
       .fillMaxWidth()
       .testTag("active_room_card")
@@ -820,14 +884,38 @@ private fun ActiveRoomCard(
       }
 
       Text(
-        text = "Código: ${room.code} • ${room.difficulty}",
-        fontSize = 20.sp,
+        text = "Código: ${room.code} • ${room.difficulty}${if (isSecret) " • 🕵️ SECRETO" else ""}",
+        fontSize = 19.sp,
         fontWeight = FontWeight.Black,
         color = Color.White,
         letterSpacing = 1.sp
       )
 
-      if (isElite) {
+      if (isSecret) {
+        Spacer(modifier = Modifier.height(6.dp))
+        val isLocalSecretImpostor = room.ghostPlayerUserId == currentUserId
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = if (isLocalSecretImpostor) Color(0xFF7F1D1D) else Color(0xFF1E293B),
+          border = BorderStroke(1.dp, if (isLocalSecretImpostor) Color(0xFFFCA5A5) else Color(0xFF38BDF8)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          val bannerText = when {
+            isLocalSecretImpostor -> "🎭 MODO SECRETO: Você é o Fantasma Impostor disfarçado de gato! Entre na arena e use 🗡️ Matar sem ser descoberto!"
+            room.ghostPlayerUserId.isNotBlank() -> "🕵️ MODO SECRETO ATIVO: 1 jogador aqui dentro é o Fantasma disfarçado! Observe bem e aperte 🚨 Denunciar se suspeitar!"
+            else -> "🕵️ MODO SECRETO ATIVO: Quando houver 2+ jogadores na sala, 1 será sorteado aleatoriamente como Fantasma disfarçado!"
+          }
+          Text(
+            text = bannerText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(8.dp)
+          )
+        }
+      }
+
+      if (isElite && !isSecret) {
         Spacer(modifier = Modifier.height(6.dp))
         Surface(
           shape = RoundedCornerShape(10.dp),
@@ -856,11 +944,16 @@ private fun ActiveRoomCard(
       } else {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
           roomPlayers.forEach { p ->
-            val isGhostRole = isElite && (p.userId == room.ghostPlayerUserId || p.role == "ghost")
+            val isGhostRole = !isSecret && isElite && (p.userId == room.ghostPlayerUserId || p.role == "ghost")
+            val isDead = eliminatedSet.contains(p.userId)
             val isMe = p.userId == currentUserId
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = if (isGhostRole) Color(0xFF4C1D95) else Color(0xFF1E293B),
+              color = when {
+                isDead -> Color(0xFF0F172A)
+                isGhostRole -> Color(0xFF4C1D95)
+                else -> Color(0xFF1E293B)
+              },
               border = BorderStroke(1.dp, if (isMe) Color(0xFF38BDF8) else Color(0xFF334155)),
               modifier = Modifier.fillMaxWidth()
             ) {
@@ -870,23 +963,28 @@ private fun ActiveRoomCard(
                 horizontalArrangement = Arrangement.SpaceBetween
               ) {
                 Column(modifier = Modifier.weight(1f)) {
+                  val roleIcon = when {
+                    isDead -> "💀 Eliminado"
+                    isGhostRole -> "👻 Fantasma"
+                    else -> "🐱 Gato"
+                  }
                   Text(
-                    text = "${if (isGhostRole) "👻 Fantasma" else "🐱 Gato"} • @${p.username}${if (isMe) " (Você)" else ""}",
+                    text = "$roleIcon • @${p.username}${if (isMe) " (Você)" else ""}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = if (isDead) Color(0xFF94A3B8) else Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                   )
                   val votesForPlayer = voteCounts[p.userId] ?: 0
                   Text(
-                    text = "🐾 ${p.score} pts${if (isElite) " • 🗳️ $votesForPlayer voto(s)" else ""}",
+                    text = "🐾 ${p.score} pts${if (isElite && !isSecret) " • 🗳️ $votesForPlayer voto(s)" else ""}",
                     fontSize = 10.sp,
                     color = Color(0xFF94A3B8)
                   )
                 }
 
-                if (isElite) {
+                if (isElite && !isSecret) {
                   Button(
                     onClick = { onVoteGhost(p.userId) },
                     enabled = !isBusy,
@@ -927,10 +1025,11 @@ private fun ActiveRoomCard(
           .height(50.dp)
           .testTag("enter_multiplayer_arena_button")
       ) {
-        val label = if (isElite && room.ghostPlayerUserId == currentUserId) {
-          "👻 Entrar na Arena como FANTASMA!"
-        } else {
-          "▶️ Entrar na Arena Agora! (${roomPlayers.size}/${room.maxPlayers})"
+        val label = when {
+          isSecret && room.ghostPlayerUserId == currentUserId -> "🎭 Entrar como IMPOSTOR Disfarçado!"
+          isSecret -> "🕵️ Entrar na Partida Secreta! (${roomPlayers.size}/${room.maxPlayers})"
+          isElite && room.ghostPlayerUserId == currentUserId -> "👻 Entrar na Arena como FANTASMA!"
+          else -> "▶️ Entrar na Arena Agora! (${roomPlayers.size}/${room.maxPlayers})"
         }
         Text(label, fontSize = 13.sp, fontWeight = FontWeight.Black, color = Color.White)
       }

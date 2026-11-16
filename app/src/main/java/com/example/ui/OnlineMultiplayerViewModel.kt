@@ -426,6 +426,7 @@ class OnlineMultiplayerViewModel(
     wins: Int,
     maxPlayers: Int = 100,
     difficulty: String = "NORMAL",
+    isSecretMode: Boolean = false,
     skinId: String = "classic_orange",
     targetCats: Int = 10
   ) {
@@ -449,15 +450,17 @@ class OnlineMultiplayerViewModel(
         targetCats = targetCats,
         maxPlayers = maxPlayers,
         difficulty = difficulty,
+        isSecretMode = isSecretMode,
         skinId = skinId
       )
       _isBusy.value = false
       res.onSuccess { room ->
         attachRoomListener(room.code)
+        val secretTag = if (room.isSecretMode) " (Modo Secreto 🕵️)" else ""
         _statusMessage.value = if (isPublic) {
-          "Sala pública ${room.code} criada (${room.maxPlayers} vagas, ${room.difficulty})!"
+          "Sala pública ${room.code} criada$secretTag (${room.maxPlayers} vagas, ${room.difficulty})!"
         } else {
-          "Sala privada ${room.code} criada (${room.maxPlayers} vagas)! Compartilhe o código."
+          "Sala privada ${room.code} criada$secretTag (${room.maxPlayers} vagas)! Compartilhe o código."
         }
       }.onFailure { err ->
         _errorMessage.value = err.localizedMessage ?: "Não foi possível criar a sala."
@@ -498,7 +501,8 @@ class OnlineMultiplayerViewModel(
       _isBusy.value = false
       res.onSuccess { room ->
         attachRoomListener(room.code)
-        _statusMessage.value = "Você entrou na sala ${room.code} (${room.playerCount}/${room.maxPlayers})!"
+        val secretTag = if (room.isSecretMode) " • Modo Secreto 🕵️" else ""
+        _statusMessage.value = "Você entrou na sala ${room.code} (${room.playerCount}/${room.maxPlayers}$secretTag)!"
       }.onFailure { err ->
         _errorMessage.value = err.localizedMessage ?: "Não foi possível entrar na sala."
       }
@@ -510,6 +514,7 @@ class OnlineMultiplayerViewModel(
     wins: Int,
     maxPlayers: Int = 100,
     difficulty: String = "NORMAL",
+    isSecretMode: Boolean = false,
     skinId: String = "classic_orange"
   ) {
     val myName = suggestedUsername()
@@ -531,15 +536,17 @@ class OnlineMultiplayerViewModel(
         skinId = skinId,
         preferredMaxPlayers = maxPlayers,
         preferredDifficulty = difficulty,
+        preferredSecretMode = isSecretMode,
         targetCats = 10
       )
       _isBusy.value = false
       res.onSuccess { (room, joinedExisting) ->
         attachRoomListener(room.code)
+        val secretTag = if (room.isSecretMode) " • Modo Secreto 🕵️" else ""
         _statusMessage.value = if (joinedExisting) {
-          "⚡ Entrou na partida pública ${room.code} sem código! (${room.playerCount}/${room.maxPlayers})"
+          "⚡ Entrou na partida pública ${room.code} sem código! (${room.playerCount}/${room.maxPlayers}$secretTag)"
         } else {
-          "🌐 Nenhuma sala aberta havia — sala pública ${room.code} (${room.maxPlayers} vagas) criada automaticamente!"
+          "🌐 Nenhuma sala aberta havia — sala pública ${room.code} (${room.maxPlayers} vagas$secretTag) criada automaticamente!"
         }
       }.onFailure { err ->
         _errorMessage.value = err.localizedMessage ?: "Falha na busca de partida pública."
@@ -569,6 +576,102 @@ class OnlineMultiplayerViewModel(
     }
   }
 
+  fun ensureSecretGhostAssigned() {
+    val room = _activeRoom.value ?: return
+    if (!room.isSecretMode || room.ghostPlayerUserId.isNotBlank() || room.status == "finished") return
+    if (_roomPlayersState.value.size < 2) return
+    viewModelScope.launch {
+      repository.ensureSecretGhostAssigned(room.code)
+    }
+  }
+
+  fun killSecretVictim(victimUid: String, victimUsername: String) {
+    val room = _activeRoom.value ?: return
+    if (!room.isSecretMode || room.status == "finished") return
+    val myName = suggestedUsername()
+    viewModelScope.launch {
+      val res = repository.killPlayerInSecretMatch(
+        roomCode = room.code,
+        killerUid = currentUserId,
+        killerUsername = myName,
+        victimUid = victimUid
+      )
+      res.onSuccess {
+        _statusMessage.value = "🗡️ Você eliminou @$victimUsername!"
+      }.onFailure { err ->
+        _errorMessage.value = err.localizedMessage ?: "Falha ao eliminar jogador."
+      }
+    }
+  }
+
+  fun callMeeting() {
+    val room = _activeRoom.value ?: return
+    if (room.status == "finished" || room.meetingStatus == "active") return
+    val myName = suggestedUsername()
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = repository.callEmergencyMeeting(
+        roomCode = room.code,
+        callerUid = currentUserId,
+        callerUsername = myName
+      )
+      _isBusy.value = false
+      res.onFailure { err ->
+        _errorMessage.value = err.localizedMessage ?: "Falha ao iniciar reunião."
+      }
+    }
+  }
+
+  fun castBanishVote(targetUidOrSkip: String, skinId: String = "classic_orange") {
+    val room = _activeRoom.value ?: return
+    if (room.meetingStatus != "active") return
+    val myName = suggestedUsername()
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = repository.castBanishVote(
+        roomCode = room.code,
+        voterUid = currentUserId,
+        voterUsername = myName,
+        targetUidOrSkip = targetUidOrSkip,
+        round = room.meetingRound,
+        skinId = skinId
+      )
+      _isBusy.value = false
+      res.onSuccess {
+        _statusMessage.value = if (targetUidOrSkip == "SKIP") {
+          "⏭️ Você pulou o voto nesta reunião."
+        } else {
+          val targetName = _roomPlayersState.value.find { it.userId == targetUidOrSkip }?.username ?: "Jogador"
+          "🗳️ Você acusou @$targetName!"
+        }
+      }.onFailure { err ->
+        _errorMessage.value = err.localizedMessage ?: "Falha ao registrar acusação."
+      }
+    }
+  }
+
+  fun resolveMeeting() {
+    val room = _activeRoom.value ?: return
+    if (room.meetingStatus != "active") return
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = repository.resolveSecretMeeting(room.code)
+      _isBusy.value = false
+      res.onFailure { err ->
+        _errorMessage.value = err.localizedMessage ?: "Falha ao encerrar votação."
+      }
+    }
+  }
+
+  fun dismissMeetingResult() {
+    val room = _activeRoom.value ?: return
+    viewModelScope.launch {
+      _isBusy.value = true
+      repository.dismissMeetingResult(room.code)
+      _isBusy.value = false
+    }
+  }
+
   fun syncArenaProgress(
     x: Float,
     y: Float,
@@ -584,6 +687,14 @@ class OnlineMultiplayerViewModel(
     val isHost = room.hostUserId == currentUserId
     val isGuestSlot = room.guestUserId == currentUserId
     val myName = suggestedUsername()
+    val me = _roomPlayersState.value.find { it.userId == currentUserId }
+    val eliminatedSet = room.eliminatedUserIdsCsv
+      .split(",")
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+      .toSet()
+    val isAlive = !eliminatedSet.contains(currentUserId)
+    val safeSyncedRole = if (room.isSecretMode) "cat" else role
     viewModelScope.launch {
       repository.syncPlayerProgress(
         roomCode = room.code,
@@ -594,9 +705,12 @@ class OnlineMultiplayerViewModel(
         x = x,
         y = y,
         score = score,
-        role = role,
+        role = safeSyncedRole,
         skinId = skinId,
-        voteGhostForUid = voteGhostForUid,
+        voteGhostForUid = voteGhostForUid.ifBlank { me?.voteGhostForUid.orEmpty() },
+        isAlive = isAlive,
+        banishVoteForUid = me?.banishVoteForUid.orEmpty(),
+        banishVoteRound = me?.banishVoteRound ?: 0L,
         winnerUserId = winnerUserId,
         winnerUsername = winnerUsername
       )

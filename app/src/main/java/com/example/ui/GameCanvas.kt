@@ -255,8 +255,17 @@ fun GameCanvas(
 
         for (partner in remotePlayersSnapshot) {
           val key = partner.userId.ifBlank { partner.username }
-          val showLabel = partner.role == "ghost" || nearestNamedIds.contains(key)
-          drawRemotePartnerCat(partner, frameTime, textPaint, is3d, showLabel)
+          val isEliminated = uiState.eliminatedUserIds.contains(partner.userId)
+          val showLabel = (partner.role == "ghost" && !uiState.isSecretMode) || nearestNamedIds.contains(key)
+          drawRemotePartnerCat(
+            partner = partner,
+            gameTime = frameTime,
+            textPaint = textPaint,
+            is3d = is3d,
+            showLabel = showLabel,
+            isSecretMode = uiState.isSecretMode,
+            isEliminated = isEliminated
+          )
         }
 
         val nearestBotIds = botsSnapshot
@@ -289,7 +298,7 @@ fun GameCanvas(
           )
         }
 
-        if (uiState.isPlayerGhost || engine.isPlayerGhost) {
+        if ((uiState.isPlayerGhost || engine.isPlayerGhost) && !uiState.isSecretMode) {
           drawPlayerHunterGhost(
             pos = heroPos,
             isDashing = engine.isDashing,
@@ -297,12 +306,20 @@ fun GameCanvas(
             gameTime = frameTime
           )
         } else {
+          if (uiState.isSecretMode && (uiState.isPlayerGhost || engine.isPlayerGhost) && uiState.isLocalPlayerAlive) {
+            drawCircle(
+              color = Color(0xFFEF4444).copy(alpha = 0.55f),
+              radius = 33f + sin(frameTime * 5f) * 3f,
+              center = Offset(heroPos.x, heroPos.y - if (is3d) 10f else 0f),
+              style = Stroke(width = 3f)
+            )
+          }
           drawHeroCat(
             pos = heroPos,
             angle = engine.heroAngle,
             skin = activeSkin,
             isInvincible = engine.isInvincible,
-            isInvisible = engine.isEffectivelyInvisible,
+            isInvisible = engine.isEffectivelyInvisible || !uiState.isLocalPlayerAlive,
             hasShield = engine.shieldActive,
             hasCatnip = engine.catnipTimer > 0f,
             hasMagnet = engine.magnetTimer > 0f || engine.giantMagnetTimer > 0f,
@@ -406,7 +423,9 @@ fun GameCanvas(
 
       val targetPos: Vector2D? = if (uiState.isPlayerGhost || engine.isPlayerGhost) {
         engine.snapshotAiRunnerCat()?.position
-          ?: engine.snapshotRemotePlayers().filter { it.role != "ghost" }.minByOrNull { (it.position - heroPos).length() }?.position
+          ?: engine.snapshotRemotePlayers()
+            .filter { it.role != "ghost" && !uiState.eliminatedUserIds.contains(it.userId) }
+            .minByOrNull { (it.position - heroPos).length() }?.position
       } else {
         engine.snapshotCollectibles().minByOrNull { (it.position - heroPos).length() }?.position
       }
@@ -442,20 +461,25 @@ private fun DrawScope.drawRemotePartnerCat(
   gameTime: Float,
   textPaint: Paint,
   is3d: Boolean,
-  showLabel: Boolean
+  showLabel: Boolean,
+  isSecretMode: Boolean = false,
+  isEliminated: Boolean = false
 ) {
   val lift = if (is3d) -10f else 0f
   val center = Offset(partner.position.x, partner.position.y + lift)
 
   if (is3d) {
     drawOval(
-      color = Color.Black.copy(alpha = 0.4f),
+      color = Color.Black.copy(alpha = if (isEliminated) 0.18f else 0.4f),
       topLeft = Offset(partner.position.x - 22f, partner.position.y + 10f),
       size = Size(44f, 20f)
     )
   }
 
-  if (partner.role == "ghost") {
+  if (isEliminated) {
+    drawCircle(color = Color(0xFF94A3B8).copy(alpha = 0.28f), radius = 21f, center = center)
+    drawCircle(color = Color(0xFFE2E8F0).copy(alpha = 0.45f), radius = 21f, center = center, style = Stroke(width = 2f))
+  } else if (partner.role == "ghost" && !isSecretMode) {
     val haloR = 40f + sin(gameTime * 7f) * 5f
     drawCircle(color = Color(0xFF9333EA).copy(alpha = 0.35f), radius = haloR, center = center)
     val ghostPath = Path().apply {
@@ -499,9 +523,18 @@ private fun DrawScope.drawRemotePartnerCat(
   if (showLabel) {
     val savedColor = textPaint.color
     val savedSize = textPaint.textSize
-    textPaint.color = if (partner.role == "ghost") android.graphics.Color.MAGENTA else android.graphics.Color.CYAN
+    val showGhostBadge = partner.role == "ghost" && !isSecretMode && !isEliminated
+    textPaint.color = when {
+      isEliminated -> android.graphics.Color.LTGRAY
+      showGhostBadge -> android.graphics.Color.MAGENTA
+      else -> android.graphics.Color.CYAN
+    }
     textPaint.textSize = 22f
-    val prefix = if (partner.role == "ghost") "👻 " else ""
+    val prefix = when {
+      isEliminated -> "💀 "
+      showGhostBadge -> "👻 "
+      else -> ""
+    }
     drawContext.canvas.nativeCanvas.drawText(
       "$prefix@${partner.username} (${partner.score})",
       center.x,

@@ -335,4 +335,140 @@ class MultiplayerRepositoryRuleTest : FirestoreEmulatorTestBase() {
       aliceRepo.deleteGameplayVideo(postId).getOrThrow()
     }
   }
+
+  @Test
+  fun secretMode_randomGhost_kill_meeting_accuseVote_and_banishReveal_succeeds() = runBlocking {
+    val code = randomCode()
+    val aliceUid = signInTestUser("alice_sec@test.com")
+    val aliceRepo = MultiplayerRepository(firestore)
+    val roomCreated = withTimeout(5000L) {
+      aliceRepo.createRoom(
+        hostUserId = aliceUid,
+        hostUsername = "AliceSec",
+        isPublic = true,
+        targetCats = 10,
+        maxPlayers = 20,
+        difficulty = "NORMAL",
+        isSecretMode = true,
+        skinId = "classic_orange",
+        explicitCode = code
+      ).getOrThrow()
+    }
+    assertTrue(roomCreated.isSecretMode)
+
+    val bobUid = signInTestUser("bob_sec@test.com")
+    val bobRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      bobRepo.joinRoomByCode(code, bobUid, "BobSec", "cyber_neon").getOrThrow()
+    }
+
+    val charlieUid = signInTestUser("charlie_sec@test.com")
+    val charlieRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      charlieRepo.joinRoomByCode(code, charlieUid, "CharlieSec", "cosmic_galaxy").getOrThrow()
+    }
+
+    val dianaUid = signInTestUser("diana_sec@test.com")
+    val dianaRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      dianaRepo.joinRoomByCode(code, dianaUid, "DianaSec", "snow_mingau").getOrThrow()
+    }
+
+    val assignedGhostUid = withTimeout(5000L) {
+      aliceRepo.ensureSecretGhostAssigned(code).getOrThrow()
+    }
+    val allParticipants = listOf(
+      Triple(aliceUid, "AliceSec", "alice_sec@test.com"),
+      Triple(bobUid, "BobSec", "bob_sec@test.com"),
+      Triple(charlieUid, "CharlieSec", "charlie_sec@test.com"),
+      Triple(dianaUid, "DianaSec", "diana_sec@test.com")
+    )
+    assertTrue(allParticipants.any { it.first == assignedGhostUid })
+
+    // Verify expanded map coordinates sync cleanly (3200 x 4800)
+    signInTestUser("bob_sec@test.com")
+    withTimeout(5000L) {
+      bobRepo.syncPlayerProgress(
+        roomCode = code,
+        userId = bobUid,
+        username = "BobSec",
+        isHost = false,
+        isGuestSlot = true,
+        x = 2950f,
+        y = 4500f,
+        score = 2,
+        role = "cat"
+      ).getOrThrow()
+    }
+
+    val ghostEntry = allParticipants.first { it.first == assignedGhostUid }
+    val innocents = allParticipants.filter { it.first != assignedGhostUid }
+    val firstVictim = innocents[0]
+    val secondInnocent = innocents[1]
+    val thirdInnocent = innocents[2]
+
+    // Secret ghost kills first innocent player
+    signInTestUser(ghostEntry.third)
+    val ghostRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      ghostRepo.killPlayerInSecretMatch(code, ghostEntry.first, ghostEntry.second, firstVictim.first).getOrThrow()
+    }
+
+    val afterKillRoom = withTimeout(3000L) {
+      ghostRepo.observeRoom(code).first { it != null && it.eliminatedUserIdsCsv.contains(firstVictim.first) }
+    }!!
+    assertEquals("playing", afterKillRoom.status)
+
+    // Innocent calls emergency meeting (Round 1)
+    signInTestUser(thirdInnocent.third)
+    val callerRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      callerRepo.callEmergencyMeeting(code, thirdInnocent.first, thirdInnocent.second).getOrThrow()
+    }
+
+    val meetingRoom1 = withTimeout(3000L) {
+      callerRepo.observeRoom(code).first { it != null && it.meetingStatus == "active" && it.meetingRound == 1L }
+    }!!
+    assertEquals(thirdInnocent.second, meetingRoom1.meetingCallerUsername)
+
+    // Accuse wrong player (secondInnocent) -> not an impostor reveal
+    withTimeout(5000L) {
+      callerRepo.castBanishVote(code, thirdInnocent.first, thirdInnocent.second, secondInnocent.first, 1L).getOrThrow()
+    }
+    signInTestUser(secondInnocent.third)
+    val secondRepo = MultiplayerRepository(firestore)
+    withTimeout(5000L) {
+      secondRepo.castBanishVote(code, secondInnocent.first, secondInnocent.second, thirdInnocent.first, 1L).getOrThrow()
+    }
+    signInTestUser(ghostEntry.third)
+    withTimeout(5000L) {
+      ghostRepo.castBanishVote(code, ghostEntry.first, ghostEntry.second, secondInnocent.first, 1L).getOrThrow()
+    }
+
+    val round1Reveal = withTimeout(5000L) {
+      callerRepo.resolveSecretMeeting(code).getOrThrow()
+    }
+    assertEquals("**${secondInnocent.second}** não era um impostor", round1Reveal)
+
+    withTimeout(5000L) {
+      callerRepo.dismissMeetingResult(code).getOrThrow()
+    }
+
+    // Round 2: survivor accuses actual Secret Ghost -> impostor revealed & match finishes
+    signInTestUser(thirdInnocent.third)
+    withTimeout(5000L) {
+      callerRepo.callEmergencyMeeting(code, thirdInnocent.first, thirdInnocent.second).getOrThrow()
+      callerRepo.castBanishVote(code, thirdInnocent.first, thirdInnocent.second, ghostEntry.first, 2L).getOrThrow()
+    }
+    val round2Reveal = withTimeout(5000L) {
+      callerRepo.resolveSecretMeeting(code).getOrThrow()
+    }
+    assertEquals("**${ghostEntry.second}** realmente era um impostor", round2Reveal)
+
+    val finalRoom = withTimeout(3000L) {
+      callerRepo.observeRoom(code).first { it != null && it.status == "finished" }
+    }!!
+    assertTrue(finalRoom.lastBanishedWasImpostor)
+    assertEquals(ghostEntry.first, finalRoom.lastBanishedUserId)
+  }
 }

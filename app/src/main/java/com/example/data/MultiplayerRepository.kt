@@ -465,6 +465,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
     targetCats: Int = 10,
     maxPlayers: Int = 100,
     difficulty: String = "NORMAL",
+    isSecretMode: Boolean = false,
     skinId: String = "classic_orange",
     explicitCode: String? = null
   ): Result<MultiplayerRoom> {
@@ -480,6 +481,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
       "isPublic" to isPublic,
       "status" to "waiting",
       "difficulty" to safeDiff,
+      "isSecretMode" to isSecretMode,
       "maxPlayers" to safeMax,
       "playerCount" to 1L,
       "ghostPlayerUserId" to "",
@@ -487,15 +489,24 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
       "hostUsername" to safeName,
       "guestUserId" to "",
       "guestUsername" to "",
-      "hostX" to 800.0,
-      "hostY" to 1400.0,
+      "hostX" to 1600.0,
+      "hostY" to 2200.0,
       "hostScore" to 0L,
-      "guestX" to 800.0,
-      "guestY" to 1600.0,
+      "guestX" to 1600.0,
+      "guestY" to 2600.0,
       "guestScore" to 0L,
       "targetCats" to targetCats.toLong().coerceIn(1L, 100L),
       "winnerUserId" to "",
       "winnerUsername" to "",
+      "meetingStatus" to "none",
+      "meetingCallerUid" to "",
+      "meetingCallerUsername" to "",
+      "meetingRound" to 0L,
+      "eliminatedUserIdsCsv" to "",
+      "lastBanishedUserId" to "",
+      "lastBanishedUsername" to "",
+      "lastBanishedWasImpostor" to false,
+      "meetingResultText" to "",
       "createdAt" to FieldValue.serverTimestamp(),
       "updatedAt" to FieldValue.serverTimestamp()
     )
@@ -505,12 +516,15 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
         mapOf(
           "userId" to hostUserId,
           "username" to safeName,
-          "x" to 800.0,
-          "y" to 1400.0,
+          "x" to 1600.0,
+          "y" to 2200.0,
           "score" to 0L,
           "role" to "cat",
           "skinId" to safeSkin,
           "voteGhostForUid" to "",
+          "isAlive" to true,
+          "banishVoteForUid" to "",
+          "banishVoteRound" to 0L,
           "updatedAt" to FieldValue.serverTimestamp()
         )
       ).await()
@@ -522,6 +536,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
           isPublic = isPublic,
           status = "waiting",
           difficulty = safeDiff,
+          isSecretMode = isSecretMode,
           maxPlayers = safeMax,
           playerCount = 1L,
           hostUserId = hostUserId,
@@ -568,16 +583,26 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
         return Result.failure(IllegalStateException("Essa sala atingiu o limite de ${existing.maxPlayers} jogadores!"))
       }
 
+      val eliminatedSet = existing.eliminatedUserIdsCsv
+        .split(",")
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toSet()
+      val isPlayerAlive = !eliminatedSet.contains(guestUserId)
+
       playerRef.set(
         mapOf(
           "userId" to guestUserId,
           "username" to safeName,
-          "x" to 800.0,
-          "y" to 1600.0,
+          "x" to 1600.0,
+          "y" to 2600.0,
           "score" to 0L,
-          "role" to if (existing.ghostPlayerUserId == guestUserId) "ghost" else "cat",
+          "role" to if (!existing.isSecretMode && existing.ghostPlayerUserId == guestUserId) "ghost" else "cat",
           "skinId" to safeSkin,
           "voteGhostForUid" to "",
+          "isAlive" to isPlayerAlive,
+          "banishVoteForUid" to "",
+          "banishVoteRound" to 0L,
           "updatedAt" to FieldValue.serverTimestamp()
         )
       ).await()
@@ -616,6 +641,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
     skinId: String = "classic_orange",
     preferredMaxPlayers: Int = 100,
     preferredDifficulty: String = "NORMAL",
+    preferredSecretMode: Boolean = false,
     targetCats: Int = 10
   ): Result<Pair<MultiplayerRoom, Boolean>> {
     return try {
@@ -625,10 +651,10 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
         .limit(20)
         .get()
         .await()
-      val candidate = snap.toObjects(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-        .firstOrNull { it.playerCount < it.maxPlayers && it.hostUserId != userId }
-        ?: snap.toObjects(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-          .firstOrNull { it.playerCount < it.maxPlayers }
+      val rooms = snap.toObjects(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+      val candidate = rooms
+        .firstOrNull { it.playerCount < it.maxPlayers && it.isSecretMode == preferredSecretMode && it.hostUserId != userId }
+        ?: rooms.firstOrNull { it.playerCount < it.maxPlayers && it.isSecretMode == preferredSecretMode }
 
       if (candidate != null) {
         val joined = joinRoomByCode(candidate.code, userId, username, skinId)
@@ -641,6 +667,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
           targetCats = targetCats,
           maxPlayers = preferredMaxPlayers,
           difficulty = preferredDifficulty,
+          isSecretMode = preferredSecretMode,
           skinId = skinId
         )
         created.map { it to false }
@@ -677,12 +704,15 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
           mapOf(
             "userId" to voterUserId,
             "username" to voterUsername.ifBlank { "GatoVoto" }.take(24),
-            "x" to 800.0,
-            "y" to 1400.0,
+            "x" to 1600.0,
+            "y" to 2200.0,
             "score" to 0L,
             "role" to "cat",
             "skinId" to skinId.ifBlank { "classic_orange" }.take(64),
             "voteGhostForUid" to voteForUserId,
+            "isAlive" to true,
+            "banishVoteForUid" to "",
+            "banishVoteRound" to 0L,
             "updatedAt" to FieldValue.serverTimestamp()
           )
         ).await()
@@ -717,6 +747,319 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
     }
   }
 
+  suspend fun ensureSecretGhostAssigned(roomCode: String): Result<String> {
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    return try {
+      val players = roomRef.collection("players").get().await()
+        .toObjects(RoomPlayer::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        .map { it.userId }
+        .filter { it.isNotBlank() }
+      if (players.size < 2) {
+        return Result.success("")
+      }
+      val chosen = db.runTransaction { tx ->
+        val snap = tx.get(roomRef)
+        if (!snap.exists()) return@runTransaction ""
+        val room = snap.toObject(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+          ?: return@runTransaction ""
+        if (!room.isSecretMode || room.status == "finished") {
+          return@runTransaction room.ghostPlayerUserId
+        }
+        if (room.ghostPlayerUserId.isNotBlank()) {
+          return@runTransaction room.ghostPlayerUserId
+        }
+        val pickedUid = players[Random.nextInt(players.size)]
+        tx.update(
+          roomRef,
+          mapOf(
+            "ghostPlayerUserId" to pickedUid,
+            "updatedAt" to FieldValue.serverTimestamp()
+          )
+        )
+        pickedUid
+      }.await()
+      Result.success(chosen)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun killPlayerInSecretMatch(
+    roomCode: String,
+    killerUid: String,
+    killerUsername: String,
+    victimUid: String
+  ): Result<Unit> {
+    if (victimUid.isBlank() || victimUid == killerUid) {
+      return Result.failure(IllegalArgumentException("Alvo inválido."))
+    }
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    return try {
+      val players = roomRef.collection("players").get().await()
+        .toObjects(RoomPlayer::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+      val allIds = players.map { it.userId }.filter { it.isNotBlank() }
+
+      db.runTransaction { tx ->
+        val snap = tx.get(roomRef)
+        if (!snap.exists()) return@runTransaction
+        val room = snap.toObject(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+          ?: return@runTransaction
+        if (room.status == "finished" || room.meetingStatus == "active") return@runTransaction
+
+        val eliminatedSet = room.eliminatedUserIdsCsv
+          .split(",")
+          .map { it.trim() }
+          .filter { it.isNotBlank() }
+          .toMutableSet()
+        eliminatedSet.add(victimUid)
+        val nextCsv = eliminatedSet.joinToString(",").take(4096)
+
+        val updates = mutableMapOf<String, Any>(
+          "eliminatedUserIdsCsv" to nextCsv,
+          "updatedAt" to FieldValue.serverTimestamp()
+        )
+        val survivorsLeft = allIds.count { uid ->
+          uid != room.ghostPlayerUserId && !eliminatedSet.contains(uid)
+        }
+        if (allIds.size >= 2 && survivorsLeft <= 0) {
+          updates["status"] = "finished"
+          updates["winnerUserId"] = killerUid
+          updates["winnerUsername"] = killerUsername.ifBlank { "Impostor" }.take(24)
+        }
+        tx.update(roomRef, updates)
+      }.await()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun callEmergencyMeeting(
+    roomCode: String,
+    callerUid: String,
+    callerUsername: String
+  ): Result<Unit> {
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    return try {
+      db.runTransaction { tx ->
+        val snap = tx.get(roomRef)
+        if (!snap.exists()) return@runTransaction
+        val room = snap.toObject(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+          ?: return@runTransaction
+        if (room.status == "finished" || room.meetingStatus == "active") return@runTransaction
+
+        val nextRound = (room.meetingRound + 1L).coerceIn(1L, 9999L)
+        tx.update(
+          roomRef,
+          mapOf(
+            "meetingStatus" to "active",
+            "meetingCallerUid" to callerUid.take(128),
+            "meetingCallerUsername" to callerUsername.ifBlank { "Gato" }.take(24),
+            "meetingRound" to nextRound,
+            "lastBanishedUserId" to "",
+            "lastBanishedUsername" to "",
+            "lastBanishedWasImpostor" to false,
+            "meetingResultText" to "",
+            "updatedAt" to FieldValue.serverTimestamp()
+          )
+        )
+      }.await()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun castBanishVote(
+    roomCode: String,
+    voterUid: String,
+    voterUsername: String,
+    targetUidOrSkip: String,
+    round: Long,
+    skinId: String = "classic_orange"
+  ): Result<Unit> {
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    val playerRef = roomRef.collection("players").document(voterUid)
+    val safeTarget = targetUidOrSkip.trim().take(128)
+    val safeRound = round.coerceIn(0L, 9999L)
+    return try {
+      val existingPlayer = playerRef.get().await()
+      if (existingPlayer.exists()) {
+        playerRef.update(
+          mapOf(
+            "banishVoteForUid" to safeTarget,
+            "banishVoteRound" to safeRound,
+            "updatedAt" to FieldValue.serverTimestamp()
+          )
+        ).await()
+      } else {
+        playerRef.set(
+          mapOf(
+            "userId" to voterUid,
+            "username" to voterUsername.ifBlank { "GatoVoto" }.take(24),
+            "x" to 1600.0,
+            "y" to 2400.0,
+            "score" to 0L,
+            "role" to "cat",
+            "skinId" to skinId.ifBlank { "classic_orange" }.take(64),
+            "voteGhostForUid" to "",
+            "isAlive" to true,
+            "banishVoteForUid" to safeTarget,
+            "banishVoteRound" to safeRound,
+            "updatedAt" to FieldValue.serverTimestamp()
+          )
+        ).await()
+      }
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, playerRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun resolveSecretMeeting(roomCode: String): Result<String> {
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    return try {
+      val players = roomRef.collection("players").get().await()
+        .toObjects(RoomPlayer::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+
+      val resultText = db.runTransaction { tx ->
+        val snap = tx.get(roomRef)
+        if (!snap.exists()) return@runTransaction ""
+        val room = snap.toObject(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+          ?: return@runTransaction ""
+        if (room.status == "finished" || room.meetingStatus != "active") {
+          return@runTransaction room.meetingResultText
+        }
+
+        val eliminatedSet = room.eliminatedUserIdsCsv
+          .split(",")
+          .map { it.trim() }
+          .filter { it.isNotBlank() }
+          .toMutableSet()
+        val alivePlayers = players.filter { !eliminatedSet.contains(it.userId) }
+
+        val tally = mutableMapOf<String, Int>()
+        for (p in alivePlayers) {
+          if (p.banishVoteRound == room.meetingRound && p.banishVoteForUid.isNotBlank()) {
+            val target = p.banishVoteForUid
+            if (target == "SKIP" || alivePlayers.any { it.userId == target }) {
+              tally[target] = (tally[target] ?: 0) + 1
+            }
+          }
+        }
+
+        val maxVotes = tally.values.maxOrNull() ?: 0
+        val topTargets = if (maxVotes > 0) tally.filterValues { it == maxVotes }.keys else emptySet()
+
+        if (maxVotes > 0 && topTargets.size == 1 && topTargets.first() != "SKIP") {
+          val banishedUid = topTargets.first()
+          val banishedName = (alivePlayers.find { it.userId == banishedUid }?.username ?: "Jogador").take(24)
+          eliminatedSet.add(banishedUid)
+          val nextCsv = eliminatedSet.joinToString(",").take(4096)
+          val wasImpostor = room.ghostPlayerUserId.isNotBlank() && banishedUid == room.ghostPlayerUserId
+          val revealMsg = if (wasImpostor) {
+            "**$banishedName** realmente era um impostor"
+          } else {
+            "**$banishedName** não era um impostor"
+          }
+
+          val updates = mutableMapOf<String, Any>(
+            "meetingStatus" to "result",
+            "eliminatedUserIdsCsv" to nextCsv,
+            "lastBanishedUserId" to banishedUid,
+            "lastBanishedUsername" to banishedName,
+            "lastBanishedWasImpostor" to wasImpostor,
+            "meetingResultText" to revealMsg,
+            "updatedAt" to FieldValue.serverTimestamp()
+          )
+
+          if (wasImpostor) {
+            updates["status"] = "finished"
+            updates["winnerUserId"] = room.meetingCallerUid.ifBlank { room.hostUserId }
+            updates["winnerUsername"] = "Gatos Campeões"
+          } else {
+            val survivorsLeft = alivePlayers.count { p ->
+              p.userId != room.ghostPlayerUserId && !eliminatedSet.contains(p.userId)
+            }
+            if (room.ghostPlayerUserId.isNotBlank() && survivorsLeft <= 0) {
+              val ghostName = players.find { it.userId == room.ghostPlayerUserId }?.username?.ifBlank { "Impostor" } ?: "Impostor"
+              updates["status"] = "finished"
+              updates["winnerUserId"] = room.ghostPlayerUserId
+              updates["winnerUsername"] = ghostName.take(24)
+            }
+          }
+          tx.update(roomRef, updates)
+          revealMsg
+        } else {
+          val tieMsg = "Empate ou votos pulados — ninguém foi banido!"
+          tx.update(
+            roomRef,
+            mapOf(
+              "meetingStatus" to "result",
+              "lastBanishedUserId" to "",
+              "lastBanishedUsername" to "",
+              "lastBanishedWasImpostor" to false,
+              "meetingResultText" to tieMsg,
+              "updatedAt" to FieldValue.serverTimestamp()
+            )
+          )
+          tieMsg
+        }
+      }.await()
+      Result.success(resultText)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun dismissMeetingResult(roomCode: String): Result<Unit> {
+    val cleanCode = roomCode.trim().uppercase()
+    val roomRef = db.collection("rooms").document(cleanCode)
+    return try {
+      db.runTransaction { tx ->
+        val snap = tx.get(roomRef)
+        if (!snap.exists()) return@runTransaction
+        val room = snap.toObject(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+          ?: return@runTransaction
+        if (room.status != "finished" && room.meetingStatus == "result") {
+          tx.update(
+            roomRef,
+            mapOf(
+              "meetingStatus" to "none",
+              "updatedAt" to FieldValue.serverTimestamp()
+            )
+          )
+        }
+      }.await()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, roomRef.path)
+      Result.failure(e)
+    }
+  }
+
   suspend fun syncPlayerProgress(
     roomCode: String,
     userId: String,
@@ -729,14 +1072,17 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
     role: String = "cat",
     skinId: String = "classic_orange",
     voteGhostForUid: String = "",
+    isAlive: Boolean = true,
+    banishVoteForUid: String = "",
+    banishVoteRound: Long = 0L,
     winnerUserId: String? = null,
     winnerUsername: String? = null
   ): Result<Unit> {
     val cleanCode = roomCode.trim().uppercase()
     val docRef = db.collection("rooms").document(cleanCode)
     val playerRef = docRef.collection("players").document(userId)
-    val safeX = x.toDouble().coerceIn(0.0, 2000.0)
-    val safeY = y.toDouble().coerceIn(0.0, 3000.0)
+    val safeX = x.toDouble().coerceIn(0.0, 5000.0)
+    val safeY = y.toDouble().coerceIn(0.0, 6000.0)
     val safeScore = score.toLong().coerceIn(0L, 9999L)
     val safeRole = if (role == "ghost") "ghost" else "cat"
     val safeSkin = skinId.ifBlank { "classic_orange" }.take(64)
@@ -752,6 +1098,9 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
           "role" to safeRole,
           "skinId" to safeSkin,
           "voteGhostForUid" to voteGhostForUid.take(128),
+          "isAlive" to isAlive,
+          "banishVoteForUid" to banishVoteForUid.take(128),
+          "banishVoteRound" to banishVoteRound.coerceIn(0L, 9999L),
           "updatedAt" to FieldValue.serverTimestamp()
         )
       ).await()
@@ -799,8 +1148,8 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
   ): Result<Unit> {
     val cleanCode = roomCode.trim().uppercase()
     val docRef = db.collection("rooms").document(cleanCode)
-    val safeX = x.toDouble().coerceIn(0.0, 2000.0)
-    val safeY = y.toDouble().coerceIn(0.0, 3000.0)
+    val safeX = x.toDouble().coerceIn(0.0, 5000.0)
+    val safeY = y.toDouble().coerceIn(0.0, 6000.0)
     val safeScore = score.toLong().coerceIn(0L, 9999L)
 
     val updates = mutableMapOf<String, Any>(

@@ -47,6 +47,8 @@ fun ControlsOverlay(
   onOpenAchievements: () -> Unit,
   onOpenAi: () -> Unit,
   onToggleRecord: () -> Unit = {},
+  onReportMeeting: () -> Unit = {},
+  onSecretKill: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   Box(modifier = modifier.fillMaxSize().padding(14.dp)) {
@@ -126,25 +128,83 @@ fun ControlsOverlay(
           }
         }
 
-        // Right Side: Action Skills (Sonic Wave + Turbo Dash)
-        Row(
+        // Right Side: Multiplayer Actions (Denunciar / Matar) + Action Skills (Sonic Wave + Turbo Dash)
+        Column(
           modifier = Modifier.align(Alignment.BottomEnd),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.Bottom
+          horizontalAlignment = Alignment.End,
+          verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          if (uiState.showSonicButton) {
-            SonicButton(
-              cooldownRatio = uiState.sonicCooldownRatio,
-              isOverdrive = uiState.sonicOverdriveActive || uiState.currentMode.infiniteSonic,
-              onTrigger = onSonicWave
-            )
+          if (uiState.activeRoomCode != null && uiState.isLocalPlayerAlive) {
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              if (uiState.isSecretMode && uiState.multiplayerRole == "ghost") {
+                val killReady = uiState.secretKillCooldownRatio <= 0.01f && uiState.nearestKillTargetUid != null
+                val killLabel = when {
+                  uiState.secretKillCooldownRatio > 0.01f -> String.format("⏳ %.1fs", uiState.secretKillCooldownSec)
+                  uiState.nearestKillTargetName != null -> "🗡️ Matar @${uiState.nearestKillTargetName?.take(8)}"
+                  else -> "🗡️ Aproxime-se"
+                }
+                Button(
+                  onClick = onSecretKill,
+                  enabled = killReady,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFDC2626),
+                    disabledContainerColor = Color(0xFF475569)
+                  ),
+                  shape = RoundedCornerShape(16.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("secret_kill_button")
+                ) {
+                  Text(
+                    text = killLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                  )
+                }
+              }
+
+              Button(
+                onClick = onReportMeeting,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier
+                  .defaultMinSize(minHeight = 48.dp)
+                  .testTag("report_meeting_button")
+              ) {
+                Text(
+                  text = "🚨 Denunciar",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Black,
+                  color = Color.White
+                )
+              }
+            }
           }
 
-          DashButton(
-            cooldownRatio = uiState.dashCooldownRatio,
-            isOverdrive = uiState.turboOverdriveActive || uiState.currentMode.infiniteTurbo,
-            onDash = onDash
-          )
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Bottom
+          ) {
+            if (uiState.showSonicButton) {
+              SonicButton(
+                cooldownRatio = uiState.sonicCooldownRatio,
+                isOverdrive = uiState.sonicOverdriveActive || uiState.currentMode.infiniteSonic,
+                onTrigger = onSonicWave
+              )
+            }
+
+            DashButton(
+              cooldownRatio = uiState.dashCooldownRatio,
+              isOverdrive = uiState.turboOverdriveActive || uiState.currentMode.infiniteTurbo,
+              onDash = onDash
+            )
+          }
         }
       }
     }
@@ -267,16 +327,33 @@ fun TopHudBar(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Lives, Elite Hunter Badge, or God Mode Indicator
-          if (uiState.isPlayerGhost) {
+          // Lives, Elite/Secret Hunter Badge, or God Mode Indicator
+          if (!uiState.isLocalPlayerAlive) {
             Surface(
-              color = Color(0xFF581C87),
+              color = Color(0xFF334155),
               shape = RoundedCornerShape(10.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE047))
+              border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF94A3B8))
             ) {
               Text(
-                text = "👻 FANTASMA",
-                color = Color(0xFFFDE047),
+                text = "💀 ELIMINADO",
+                color = Color(0xFFE2E8F0),
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          } else if (uiState.isPlayerGhost) {
+            Surface(
+              color = if (uiState.isSecretMode) Color(0xFF7F1D1D) else Color(0xFF581C87),
+              shape = RoundedCornerShape(10.dp),
+              border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (uiState.isSecretMode) Color(0xFFFCA5A5) else Color(0xFFFDE047)
+              )
+            ) {
+              Text(
+                text = if (uiState.isSecretMode) "🎭 IMPOSTOR" else "👻 FANTASMA",
+                color = if (uiState.isSecretMode) Color(0xFFFEE2E2) else Color(0xFFFDE047),
                 fontWeight = FontWeight.Black,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -443,6 +520,9 @@ fun TopHudBar(
           verticalAlignment = Alignment.CenterVertically
         ) {
           val ghostText = when {
+            !uiState.isLocalPlayerAlive -> "💀 Eliminado — assistindo como espectador"
+            uiState.isSecretMode && uiState.isPlayerGhost -> "🎭 Secreto: Você é o Fantasma disfarçado! Use 🗡️ Matar"
+            uiState.isSecretMode && uiState.activeRoomCode != null -> "🕵️ Modo Secreto: Descubra o Fantasma e 🚨 Denuncie!"
             uiState.isPlayerGhost && uiState.activeRoomCode != null -> "👻 Caçando players! Acertos: ${uiState.catsCollected}/${uiState.goalCats}"
             uiState.isPlayerGhost -> "🏃 Corredor: ${uiState.aiRunnerLives}❤️ • ${uiState.aiRunnerCats}/10 gatos"
             uiState.invisibilityActive -> "🫥 Invisível! Fantasmas perdidos"
@@ -454,6 +534,9 @@ fun TopHudBar(
             else -> "${uiState.currentMode.emoji} ${uiState.currentMode.name} • 👻 ${uiState.activeGhostsCount}"
           }
           val ghostColor = when {
+            !uiState.isLocalPlayerAlive -> Color(0xFF94A3B8)
+            uiState.isSecretMode && uiState.isPlayerGhost -> Color(0xFFFCA5A5)
+            uiState.isSecretMode -> Color(0xFF67E8F9)
             uiState.isPlayerGhost -> Color(0xFFF0ABFC)
             uiState.invisibilityActive -> Color(0xFFCBD5E1)
             uiState.isEffectiveGodMode -> Color(0xFFFDE047)
@@ -545,7 +628,13 @@ fun TopHudBar(
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.fillMaxWidth()
           ) {
-            val roleText = if (uiState.multiplayerRole == "ghost") "👻 Fantasma" else "🐱 Gato"
+            val roleText = when {
+              !uiState.isLocalPlayerAlive -> "💀 Eliminado"
+              uiState.isSecretMode && uiState.multiplayerRole == "ghost" -> "🎭 Impostor Disfarçado"
+              uiState.isSecretMode -> "🕵️ Secreto (Gato)"
+              uiState.multiplayerRole == "ghost" -> "👻 Fantasma"
+              else -> "🐱 Gato"
+            }
             val partnerLabel = uiState.partnerUsername?.let { "Líder @$it: ${uiState.partnerScore}" } ?: "Aguardando..."
             Text(
               text = "👥 Sala ${uiState.activeRoomCode} (${uiState.multiplayerPlayerCount}/${uiState.multiplayerMaxPlayers}) • $roleText • $partnerLabel",

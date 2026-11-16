@@ -24,8 +24,8 @@ data class RemotePartnerState(
 )
 
 class GameEngine(
-  val worldWidth: Float = 1600f,
-  val worldHeight: Float = 2400f,
+  val worldWidth: Float = 3200f,
+  val worldHeight: Float = 4800f,
   private val audio: GameAudio? = null
 ) {
   private val stateLock = Any()
@@ -84,10 +84,16 @@ class GameEngine(
   var remotePartner: RemotePartnerState? = null
   var remotePlayers: List<RemotePartnerState> = emptyList()
 
-  // Elite / Multiplayer Ghost Role State
+  // Elite / Multiplayer Ghost Role & Secret Mode State
   var isMultiplayerActive = false
   var multiplayerRole = "cat" // "cat" or "ghost"
   var multiplayerCaptureGoal = 3
+  var isSecretMode = false
+  var isPausedByMeeting = false
+  var localPlayerAlive = true
+  var eliminatedUserIds: Set<String> = emptySet()
+  var secretKillCooldownTimer = 0f
+  val secretKillCooldown = 8.0f
   private var ghostCaptureCooldownTimer = 0f
   var aiRunnerCat: AiRunnerCat? = null
 
@@ -141,13 +147,24 @@ class GameEngine(
   private var nextCatSerial = 1
 
   private val defaultObstacles = listOf(
-    Obstacle(worldWidth * 0.5f, worldHeight * 0.5f, 75f, "FOUNTAIN", "Fonte dos Peixinhos"),
-    Obstacle(worldWidth * 0.25f, worldHeight * 0.3f, 55f, "TREE", "Arranhador Alto"),
-    Obstacle(worldWidth * 0.75f, worldHeight * 0.3f, 55f, "TREE", "Arranhador Flor"),
-    Obstacle(worldWidth * 0.25f, worldHeight * 0.7f, 50f, "FLOWER_PATCH", "Jardim de Catnip"),
-    Obstacle(worldWidth * 0.75f, worldHeight * 0.7f, 50f, "FLOWER_PATCH", "Canteiro dos Sonhos"),
-    Obstacle(worldWidth * 0.5f, worldHeight * 0.2f, 45f, "YARN", "Novelo de Lã Gigante"),
-    Obstacle(worldWidth * 0.5f, worldHeight * 0.8f, 45f, "YARN", "Novelo Lilás")
+    Obstacle(worldWidth * 0.50f, worldHeight * 0.50f, 88f, "FOUNTAIN", "Fonte Central dos Peixinhos"),
+    Obstacle(worldWidth * 0.22f, worldHeight * 0.16f, 65f, "FOUNTAIN", "Fonte Norte"),
+    Obstacle(worldWidth * 0.78f, worldHeight * 0.84f, 65f, "FOUNTAIN", "Fonte Sul"),
+    Obstacle(worldWidth * 0.25f, worldHeight * 0.30f, 58f, "TREE", "Arranhador Alto"),
+    Obstacle(worldWidth * 0.75f, worldHeight * 0.30f, 58f, "TREE", "Arranhador Flor"),
+    Obstacle(worldWidth * 0.18f, worldHeight * 0.52f, 58f, "TREE", "Torre Oeste"),
+    Obstacle(worldWidth * 0.82f, worldHeight * 0.48f, 58f, "TREE", "Torre Leste"),
+    Obstacle(worldWidth * 0.25f, worldHeight * 0.70f, 54f, "FLOWER_PATCH", "Jardim de Catnip"),
+    Obstacle(worldWidth * 0.75f, worldHeight * 0.70f, 54f, "FLOWER_PATCH", "Canteiro dos Sonhos"),
+    Obstacle(worldWidth * 0.50f, worldHeight * 0.14f, 52f, "FLOWER_PATCH", "Mirante Norte"),
+    Obstacle(worldWidth * 0.50f, worldHeight * 0.86f, 52f, "FLOWER_PATCH", "Mirante Sul"),
+    Obstacle(worldWidth * 0.36f, worldHeight * 0.40f, 46f, "YARN", "Novelo Gigante"),
+    Obstacle(worldWidth * 0.64f, worldHeight * 0.60f, 46f, "YARN", "Novelo Lilás"),
+    Obstacle(worldWidth * 0.68f, worldHeight * 0.18f, 48f, "YARN", "Novelo Dourado"),
+    Obstacle(worldWidth * 0.32f, worldHeight * 0.82f, 48f, "YARN", "Novelo Azul"),
+    Obstacle(worldWidth * 0.15f, worldHeight * 0.76f, 52f, "TREE", "Bosque Sudoeste"),
+    Obstacle(worldWidth * 0.85f, worldHeight * 0.24f, 52f, "TREE", "Bosque Nordeste"),
+    Obstacle(worldWidth * 0.50f, worldHeight * 0.32f, 46f, "YARN", "Praça dos Gatos")
   )
 
   var obstacles: List<Obstacle> = defaultObstacles
@@ -204,10 +221,18 @@ class GameEngine(
     active: Boolean,
     myRole: String,
     players: List<RemotePartnerState>,
-    captureGoal: Int = 3
+    captureGoal: Int = 3,
+    secretMode: Boolean = false,
+    localAlive: Boolean = true,
+    eliminatedIds: Set<String> = emptySet(),
+    pausedByMeeting: Boolean = false
   ) = synchronized(stateLock) {
     val wasGhost = isPlayerGhost
     isMultiplayerActive = active
+    isSecretMode = active && secretMode
+    localPlayerAlive = !active || localAlive
+    eliminatedUserIds = eliminatedIds
+    isPausedByMeeting = active && pausedByMeeting
     multiplayerRole = if (myRole == "ghost") "ghost" else "cat"
     multiplayerCaptureGoal = captureGoal.coerceIn(1, 20)
     remotePlayers = players
@@ -215,6 +240,35 @@ class GameEngine(
     if (active && multiplayerRole == "ghost" && !wasGhost) {
       ghosts.clear()
       goalCats = multiplayerCaptureGoal
+    }
+  }
+
+  fun triggerSecretKillFeedback(victimName: String, victimPos: Vector2D) = synchronized(stateLock) {
+    secretKillCooldownTimer = secretKillCooldown
+    catsCollected++
+    ghostsScaredThisRun++
+    matchLevel = (catsCollected / 2) + 1
+    audio?.playGhostHitSound()
+    audio?.vibrateCollect()
+    addFloatingTextSafe(
+      FloatingText(
+        text = "🗡️ Eliminou @$victimName!",
+        position = victimPos + Vector2D(0f, -45f),
+        color = Color(0xFFEF4444)
+      )
+    )
+    for (i in 0 until 22) {
+      val angle = Random.nextFloat() * 2f * PI.toFloat()
+      val spd = Random.nextFloat() * 210f + 50f
+      addParticleSafe(
+        Particle(
+          position = victimPos,
+          velocity = Vector2D(cos(angle) * spd, sin(angle) * spd),
+          color = if (i % 2 == 0) Color(0xFFEF4444) else Color(0xFFC084FC),
+          size = 7.5f,
+          life = 0.7f
+        )
+      )
     }
   }
 
@@ -290,6 +344,8 @@ class GameEngine(
     maxLives = if (ghostPlayerMode) 3 else mode.heroLives
     lives = maxLives
     ghostCaptureCooldownTimer = 0f
+    secretKillCooldownTimer = 0f
+    isPausedByMeeting = false
 
     isInvincible = false
     invincibilityTimer = 0f
@@ -386,7 +442,7 @@ class GameEngine(
         val totalBots = mode.botCount.coerceIn(1, 40)
         for (i in 0 until totalBots) {
           val angle = (i.toFloat() / totalBots.toFloat()) * 2f * PI.toFloat()
-          val ringRadius = 320f + (i % 3) * 180f
+          val ringRadius = 420f + (i % 4) * 240f
           val rawPos = Vector2D(
             worldWidth * 0.5f + cos(angle) * ringRadius,
             worldHeight * 0.5f + sin(angle) * ringRadius
@@ -566,7 +622,7 @@ class GameEngine(
   }
 
   fun update(deltaTime: Float, inputDirection: Vector2D) = synchronized(stateLock) {
-    if (status != GameStatus.PLAYING) return
+    if (status != GameStatus.PLAYING || isPausedByMeeting) return
 
     val safeDelta = deltaTime.coerceIn(0.001f, 0.05f)
     gameTimeSeconds += safeDelta
@@ -602,6 +658,7 @@ class GameEngine(
     if (starInvincibleTimer > 0f) starInvincibleTimer = max(0f, starInvincibleTimer - safeDelta)
 
     if (ghostCaptureCooldownTimer > 0f) ghostCaptureCooldownTimer = max(0f, ghostCaptureCooldownTimer - safeDelta)
+    if (secretKillCooldownTimer > 0f) secretKillCooldownTimer = max(0f, secretKillCooldownTimer - safeDelta)
     if (comboTimer > 0f) {
       comboTimer -= safeDelta
       if (comboTimer <= 0f) currentCombo = 0
@@ -646,7 +703,9 @@ class GameEngine(
       follower.hopOffset = sin((gameTimeSeconds * 8f) + index * 0.7f) * 6f
     }
 
-    if (isPlayerGhost) {
+    if (!localPlayerAlive) {
+      // Eliminated / banished player can still roam freely as a spectator without collecting or hitting ghosts
+    } else if (isPlayerGhost) {
       updateGhostPlayerRole(safeDelta)
       val pickedPowerUps = mutableListOf<PowerUpItem>()
       val powerUpIter = activePowerUps.iterator()
@@ -775,8 +834,8 @@ class GameEngine(
         }
       }
 
-      // Remote player who was voted as Ghost in Multiplayer Elite can catch local Cat player
-      if (isMultiplayerActive && !isEffectivelyGodMode && !isEffectivelyInvisible && !isInvincible) {
+      // Remote player who was voted as Ghost in Multiplayer Elite (non-secret) can catch local Cat player
+      if (isMultiplayerActive && !isSecretMode && !isEffectivelyGodMode && !isEffectivelyInvisible && !isInvincible) {
         val remoteGhost = remotePlayers.firstOrNull { it.role == "ghost" && (it.position - heroPosition).length() < 58f }
         if (remoteGhost != null) {
           onHeroHitByGhost(Ghost(id = 99, position = remoteGhost.position))
@@ -928,6 +987,10 @@ class GameEngine(
 
   private fun updateGhostPlayerRole(deltaTime: Float) {
     if (isMultiplayerActive) {
+      if (isSecretMode) {
+        // In Secret Mode the impostor is disguised and attacks deliberately via the Matar button
+        return
+      }
       for (p in remotePlayers) {
         if (p.role == "cat" && (p.position - heroPosition).length() < 62f && ghostCaptureCooldownTimer <= 0f) {
           ghostCaptureCooldownTimer = 1.6f
@@ -1083,10 +1146,10 @@ class GameEngine(
 
     val actualDist = (heroPosition - g.position).length()
 
-    if (actualDist > 850f && Random.nextFloat() < 0.0025f) {
+    if (actualDist > 1400f && Random.nextFloat() < 0.0025f) {
       g.position = Vector2D(
-        (heroPosition.x + if (Random.nextBoolean()) 400f else -400f).coerceIn(60f, worldWidth - 60f),
-        (heroPosition.y + if (Random.nextBoolean()) 400f else -400f).coerceIn(60f, worldHeight - 60f)
+        (heroPosition.x + if (Random.nextBoolean()) 550f else -550f).coerceIn(60f, worldWidth - 60f),
+        (heroPosition.y + if (Random.nextBoolean()) 550f else -550f).coerceIn(60f, worldHeight - 60f)
       )
       addFloatingTextSafe(FloatingText("Buuu! O fantasma surgiu! 👻", g.position, Color(0xFFA855F7)))
       audio?.playGhostAlertSound()

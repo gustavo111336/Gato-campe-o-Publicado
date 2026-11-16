@@ -42,16 +42,16 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
-private data class ReplayObstacle(val x: Float, val y: Float, val r: Float, val color: Color)
+private data class ReplayObstacle(val xRatio: Float, val yRatio: Float, val r: Float, val color: Color)
 
 private val REPLAY_ARENA_OBSTACLES = listOf(
-  ReplayObstacle(800f, 1200f, 75f, Color(0xFF0EA5E9)),
-  ReplayObstacle(400f, 720f, 55f, Color(0xFF10B981)),
-  ReplayObstacle(1200f, 720f, 55f, Color(0xFF10B981)),
-  ReplayObstacle(400f, 1680f, 50f, Color(0xFFF472B6)),
-  ReplayObstacle(1200f, 1680f, 50f, Color(0xFFF472B6)),
-  ReplayObstacle(800f, 480f, 45f, Color(0xFFA855F7)),
-  ReplayObstacle(800f, 1920f, 45f, Color(0xFFA855F7))
+  ReplayObstacle(0.50f, 0.50f, 75f, Color(0xFF0EA5E9)),
+  ReplayObstacle(0.25f, 0.30f, 55f, Color(0xFF10B981)),
+  ReplayObstacle(0.75f, 0.30f, 55f, Color(0xFF10B981)),
+  ReplayObstacle(0.25f, 0.70f, 50f, Color(0xFFF472B6)),
+  ReplayObstacle(0.75f, 0.70f, 50f, Color(0xFFF472B6)),
+  ReplayObstacle(0.50f, 0.20f, 45f, Color(0xFFA855F7)),
+  ReplayObstacle(0.50f, 0.80f, 45f, Color(0xFFA855F7))
 )
 
 @Composable
@@ -86,12 +86,12 @@ fun ReplayViewerDialog(
       (0 until total).map { i ->
         val t = (i.toFloat() / (total - 1)) * dur
         val angle = (i.toFloat() / total) * (2 * Math.PI.toFloat() * 2f)
-        val hx = 800f + 480f * cos(angle)
-        val hy = 1200f + 720f * sin(angle)
-        val gx = 800f + 380f * cos(angle - 0.45f)
-        val gy = 1200f + 620f * sin(angle - 0.45f)
-        val cx = 800f + 500f * cos(angle + 0.35f)
-        val cy = 1200f + 750f * sin(angle + 0.35f)
+        val hx = 1600f + 920f * cos(angle)
+        val hy = 2400f + 1350f * sin(angle)
+        val gx = 1600f + 720f * cos(angle - 0.45f)
+        val gy = 2400f + 1150f * sin(angle - 0.45f)
+        val cx = 1600f + 950f * cos(angle + 0.35f)
+        val cy = 2400f + 1400f * sin(angle + 0.35f)
         val cats = ((i.toFloat() / total) * max(1L, post.score / 60)).toInt()
         val sc = ((i.toFloat() / total) * post.score).toInt()
         ReplayFrame(
@@ -108,6 +108,12 @@ fun ReplayViewerDialog(
         )
       }
     }
+  }
+
+  val inferredWorldSize = remember(frames) {
+    val maxX = frames.maxOfOrNull { max(it.heroX, max(it.ghostX, it.catX)) } ?: 3200f
+    val maxY = frames.maxOfOrNull { max(it.heroY, max(it.ghostY, it.catY)) } ?: 4800f
+    if (maxX > 1650f || maxY > 2450f) 3200f to 4800f else 1600f to 2400f
   }
 
   var currentFrameIndex by remember { mutableIntStateOf(0) }
@@ -227,9 +233,10 @@ fun ReplayViewerDialog(
             val canvasW = size.width
             val canvasH = size.height
 
-            // Scale from GameEngine world coordinates (1600x2400)
-            val scaleX = canvasW / 1600f
-            val scaleY = canvasH / 2400f
+            // Scale dynamically from either 1600x2400 (legacy) or 3200x4800 (expanded map)
+            val (worldW, worldH) = inferredWorldSize
+            val scaleX = canvasW / worldW
+            val scaleY = canvasH / worldH
             val unitScale = (canvasW / 400f).coerceIn(0.7f, 1.8f)
 
             // Arena Background Gradient
@@ -255,9 +262,9 @@ fun ReplayViewerDialog(
 
             // Arena Obstacles (subtle park landmarks)
             for (obs in REPLAY_ARENA_OBSTACLES) {
-              val ox = obs.x * scaleX
-              val oy = obs.y * scaleY
-              val orad = obs.r * scaleX
+              val ox = obs.xRatio * canvasW
+              val oy = obs.yRatio * canvasH
+              val orad = (obs.r / 1600f) * canvasW
               drawCircle(
                 color = obs.color.copy(alpha = 0.16f),
                 radius = orad,

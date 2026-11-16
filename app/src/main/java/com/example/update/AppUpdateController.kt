@@ -41,7 +41,7 @@ data class AppUpdateUiState(
   val availableVersionName: String? = null,
   val downloadProgressPercent: Int = 0,
   val message: String = "Versão atual: v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
-  val storeUrl: String = "https://github.com/gustavo111336/Gato-campe-o-Publicado-/tree/main/app/apk"
+  val storeUrl: String = "https://github.com/gustavo111336/Gato-campe-o-Publicado/tree/main/app/apk"
 )
 
 class AppUpdateController(context: Context) {
@@ -50,7 +50,7 @@ class AppUpdateController(context: Context) {
   private var launcher: ActivityResultLauncher<IntentSenderRequest>? = null
   private val prefs = appContext.getSharedPreferences("app_update_prefs", Context.MODE_PRIVATE)
 
-  private val defaultGitHubFolderUrl = "https://github.com/gustavo111336/Gato-campe-o-Publicado-/tree/main/app/apk"
+  private val defaultGitHubFolderUrl = "https://github.com/gustavo111336/Gato-campe-o-Publicado/tree/main/app/apk"
   private val defaultPlayUrl = "https://play.google.com/store/apps/details?id=${appContext.packageName}"
 
   private val _state = MutableStateFlow(
@@ -137,10 +137,11 @@ class AppUpdateController(context: Context) {
     // Check latest commit SHA on GitHub repository main branch
     Thread {
       try {
-        val apiUrl = URL("https://api.github.com/repos/gustavo111336/Gato-campe-o-Publicado-/commits/main")
+        val apiUrl = URL("https://api.github.com/repos/gustavo111336/Gato-campe-o-Publicado/commits/main")
         val conn = (apiUrl.openConnection() as HttpURLConnection).apply {
           requestMethod = "GET"
           setRequestProperty("Accept", "application/vnd.github+json")
+          setRequestProperty("User-Agent", "GatoCampeao-Android-Updater")
           connectTimeout = 4000
           readTimeout = 4000
         }

@@ -86,13 +86,14 @@
     },
     "MultiplayerRoom": {
       "title": "MultiplayerRoom",
-      "description": "Real-time 2-to-200 player match room supporting public auto-join, private codes, and Elite Ghost voting.",
+      "description": "Real-time 2-to-200 player match room supporting public auto-join, private codes, Elite Ghost voting, and Secret Impostor mode with meetings & banishment.",
       "type": "object",
       "properties": {
         "code": { "type": "string" },
         "isPublic": { "type": "boolean" },
         "status": { "type": "string", "enum": ["waiting", "playing", "finished"] },
         "difficulty": { "type": "string", "enum": ["NORMAL", "CALMO", "DESAFIO", "ELITE"] },
+        "isSecretMode": { "type": "boolean" },
         "maxPlayers": { "type": "integer" },
         "playerCount": { "type": "integer" },
         "ghostPlayerUserId": { "type": "string" },
@@ -109,19 +110,31 @@
         "targetCats": { "type": "integer" },
         "winnerUserId": { "type": "string" },
         "winnerUsername": { "type": "string" },
+        "meetingStatus": { "type": "string", "enum": ["none", "active", "result"] },
+        "meetingCallerUid": { "type": "string" },
+        "meetingCallerUsername": { "type": "string" },
+        "meetingRound": { "type": "integer" },
+        "eliminatedUserIdsCsv": { "type": "string" },
+        "lastBanishedUserId": { "type": "string" },
+        "lastBanishedUsername": { "type": "string" },
+        "lastBanishedWasImpostor": { "type": "boolean" },
+        "meetingResultText": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
-        "code", "isPublic", "status", "difficulty", "maxPlayers", "playerCount",
+        "code", "isPublic", "status", "difficulty", "isSecretMode", "maxPlayers", "playerCount",
         "ghostPlayerUserId", "hostUserId", "hostUsername", "guestUserId",
         "guestUsername", "hostX", "hostY", "hostScore", "guestX", "guestY",
-        "guestScore", "targetCats", "winnerUserId", "winnerUsername", "createdAt", "updatedAt"
+        "guestScore", "targetCats", "winnerUserId", "winnerUsername",
+        "meetingStatus", "meetingCallerUid", "meetingCallerUsername", "meetingRound",
+        "eliminatedUserIdsCsv", "lastBanishedUserId", "lastBanishedUsername",
+        "lastBanishedWasImpostor", "meetingResultText", "createdAt", "updatedAt"
       ]
     },
     "RoomPlayer": {
       "title": "RoomPlayer",
-      "description": "Individual player state inside a multiplayer room (supports 2..200 players, Ghost vote, and instant leave deletion).",
+      "description": "Individual player state inside a multiplayer room (supports 2..200 players, Ghost vote, Secret meeting banishment vote, and alive status).",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -132,9 +145,15 @@
         "role": { "type": "string", "enum": ["cat", "ghost"] },
         "skinId": { "type": "string" },
         "voteGhostForUid": { "type": "string" },
+        "isAlive": { "type": "boolean" },
+        "banishVoteForUid": { "type": "string" },
+        "banishVoteRound": { "type": "integer" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "username", "x", "y", "score", "role", "skinId", "voteGhostForUid", "updatedAt"]
+      "required": [
+        "userId", "username", "x", "y", "score", "role", "skinId",
+        "voteGhostForUid", "isAlive", "banishVoteForUid", "banishVoteRound", "updatedAt"
+      ]
     },
     "AppReleaseInfo": {
       "title": "AppReleaseInfo",
