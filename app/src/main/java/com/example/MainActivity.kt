@@ -375,6 +375,13 @@ class MainActivity : ComponentActivity() {
                 onStartNormal = { viewModel.startNormalGame() },
                 onStartEndless = { viewModel.startEndlessGame() },
                 onStartBots = { viewModel.startBotsGame() },
+                onStartCustomBots = { count, secret ->
+                  viewModel.startCustomBotsGame(
+                    botCount = count,
+                    secretMode = secret,
+                    localUsername = onlineVm?.suggestedUsername().orEmpty().ifBlank { "Você" }
+                  )
+                },
                 onDifficultyChange = { viewModel.setDifficulty(it) },
                 onOpenModes = { viewModel.openModes(true) },
                 onOpenCreator = { viewModel.openCreator(true) },
@@ -397,10 +404,14 @@ class MainActivity : ComponentActivity() {
             if (uiState.gameStatus == GameStatus.PAUSED) {
               PauseOverlay(
                 hasRecordedReplay = uiState.hasRecordedReplay,
+                showSoloRoomBotsOption = uiState.activeRoomCode != null && !uiState.isBotsMode && uiState.multiplayerPlayerCount <= 1,
                 onResume = { viewModel.onTogglePause() },
                 onRestart = { viewModel.restartCurrentMode() },
                 onReturnToMenu = { viewModel.returnToMenu() },
                 onOpenSettings = { viewModel.openSettings(true) },
+                onOpenRoomBots = {
+                  viewModel.openOnlineDialog(true, OnlineLobbyTab.ROOMS)
+                },
                 onPostReplay = { viewModel.openPostReplayDialog(true) },
                 onOpenVideosFeed = { viewModel.openOnlineDialog(true, OnlineLobbyTab.VIDEOS) }
               )

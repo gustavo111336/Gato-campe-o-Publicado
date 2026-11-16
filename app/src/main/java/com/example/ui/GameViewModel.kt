@@ -1091,6 +1091,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     startMode(BOTS_ARENA_MODE)
   }
 
+  fun startCustomBotsGame(
+    botCount: Int,
+    secretMode: Boolean,
+    localUsername: String = "Você",
+    roomCode: String = ""
+  ) {
+    val safeBots = botCount.coerceIn(1, 20)
+    val effectiveSecret = secretMode && safeBots > 2
+    if (!effectiveSecret && safeBots == 20 && roomCode.isBlank()) {
+      startBotsGame()
+    } else {
+      startMultiplayerBotsGame(
+        botCount = safeBots,
+        secretMode = effectiveSecret,
+        localUsername = localUsername,
+        roomCode = roomCode
+      )
+    }
+  }
+
   fun startMultiplayerBotsGame(
     botCount: Int,
     secretMode: Boolean,
@@ -1459,9 +1479,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     eliminatedIds: Set<String> = emptySet(),
     isMeetingPaused: Boolean = false
   ) {
+    val otherRoomPlayersCount = players.count { it.userId.isNotBlank() && it.userId != myUserId }
     val soloBotsRunning = engine.currentMode.isBotsMode &&
       roomCode != null &&
-      maxOf(players.size, 1) <= 1 &&
+      otherRoomPlayersCount == 0 &&
       (engine.status == GameStatus.PLAYING || engine.status == GameStatus.PAUSED || engine.isBotSecretMode)
 
     if (soloBotsRunning) {

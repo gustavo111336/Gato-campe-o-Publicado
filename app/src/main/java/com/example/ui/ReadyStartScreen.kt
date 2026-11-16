@@ -4,6 +4,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -12,6 +13,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -24,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
 import com.example.BuildConfig
 import com.example.model.ALL_40_ACHIEVEMENTS
 import com.example.model.ALL_40_ITEMS
@@ -37,6 +43,7 @@ fun ReadyStartScreen(
   onStartNormal: () -> Unit,
   onStartEndless: () -> Unit,
   onStartBots: () -> Unit,
+  onStartCustomBots: (botCount: Int, secretMode: Boolean) -> Unit = { _, _ -> onStartBots() },
   onDifficultyChange: (Difficulty) -> Unit,
   onOpenModes: () -> Unit,
   onOpenCreator: () -> Unit,
@@ -54,6 +61,7 @@ fun ReadyStartScreen(
   onRestoreDefaultFair: () -> Unit,
   modifier: Modifier = Modifier
 ) {
+  var showBotsConfigDialog by remember { mutableStateOf(false) }
   val infiniteTransition = rememberInfiniteTransition(label = "hero_cat_bob")
   val catScale by infiniteTransition.animateFloat(
     initialValue = 0.96f,
@@ -393,26 +401,26 @@ fun ReadyStartScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Modo Bots Button (20 Bots, Goal 50 Cats for everyone!)
+        // Modo Bots Button (Configurable 1..20 Bots + Secret Mode when >2 Bots!)
         Button(
-          onClick = onStartBots,
+          onClick = { showBotsConfigDialog = true },
           colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
           shape = RoundedCornerShape(18.dp),
           modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .height(54.dp)
             .border(1.5.dp, Color(0xFF2DD4BF), RoundedCornerShape(18.dp))
             .testTag("start_bots_mode_button")
         ) {
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-              text = "🤖 MODO BOTS (20 BOTS • META 50) 🏁",
+              text = "🤖 MODO BOTS (1 A 20 BOTS • SECRETO) 🏁",
               fontSize = 13.sp,
               fontWeight = FontWeight.Black,
               color = Color.White
             )
             Text(
-              text = "Vença 20 bots na arena — limite de todos: 50 gatos!",
+              text = "Escolha a quantidade de bots • 3+ bots libera Modo Secreto!",
               fontSize = 10.sp,
               color = Color(0xFFCCFBF1)
             )
@@ -735,6 +743,207 @@ fun ReadyStartScreen(
             color = if (uiState.isUpdateAvailable) Color(0xFF6EE7B7) else Color(0xFFCBD5E1),
             textAlign = TextAlign.Center
           )
+        }
+      }
+    }
+
+    if (showBotsConfigDialog) {
+      MenuBotsSetupDialog(
+        onStart = { count, secret ->
+          showBotsConfigDialog = false
+          onStartCustomBots(count, secret)
+        },
+        onDismiss = { showBotsConfigDialog = false }
+      )
+    }
+  }
+}
+
+@Composable
+private fun MenuBotsSetupDialog(
+  onStart: (botCount: Int, secretMode: Boolean) -> Unit,
+  onDismiss: () -> Unit
+) {
+  var botCount by remember { mutableIntStateOf(20) }
+  var secretMode by remember { mutableStateOf(false) }
+
+  Dialog(onDismissRequest = onDismiss) {
+    Card(
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+      border = BorderStroke(2.dp, Color(0xFF2DD4BF)),
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("menu_bots_setup_dialog")
+    ) {
+      Column(modifier = Modifier.padding(16.dp)) {
+        Text(
+          text = "🤖 Configurar Modo Bots",
+          fontSize = 18.sp,
+          fontWeight = FontWeight.Black,
+          color = Color(0xFF2DD4BF)
+        )
+        Text(
+          text = "Defina a quantidade de bots para jogar. Com mais de 2 bots, você também pode ativar o Modo Secreto!",
+          fontSize = 11.sp,
+          color = Color(0xFFCBD5E1),
+          modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+        )
+
+        Text(
+          text = "⚙️ Quantidade de Bots: $botCount",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold,
+          color = Color(0xFFFDE047)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedButton(
+            onClick = { botCount = (botCount - 1).coerceAtLeast(1) },
+            enabled = botCount > 1,
+            border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier
+              .size(48.dp)
+              .testTag("menu_bots_decrease")
+          ) {
+            Text("−", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF1E293B),
+            border = BorderStroke(1.dp, Color(0xFF475569)),
+            modifier = Modifier.weight(1f).height(48.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Text(
+                text = "$botCount Bot(s)",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White
+              )
+            }
+          }
+          OutlinedButton(
+            onClick = { botCount = (botCount + 1).coerceAtMost(20) },
+            enabled = botCount < 20,
+            border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier
+              .size(48.dp)
+              .testTag("menu_bots_increase")
+          ) {
+            Text("+", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          listOf(1, 2, 3, 5, 8, 12, 20).forEach { preset ->
+            FilterChip(
+              selected = botCount == preset,
+              onClick = { botCount = preset },
+              label = { Text("$preset", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+              modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+            )
+          }
+        }
+
+        if (botCount > 2) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Surface(
+            onClick = { secretMode = !secretMode },
+            shape = RoundedCornerShape(12.dp),
+            color = if (secretMode) Color(0xFF450A0A) else Color(0xFF1E293B),
+            border = BorderStroke(
+              width = if (secretMode) 1.5.dp else 1.dp,
+              color = if (secretMode) Color(0xFFEF4444) else Color(0xFF475569)
+            ),
+            modifier = Modifier
+              .fillMaxWidth()
+              .defaultMinSize(minHeight = 48.dp)
+              .testTag("menu_bots_secret_toggle")
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                  text = "🕵️ Modo Secreto (Mais de 2 Bots)",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Black,
+                  color = if (secretMode) Color(0xFFFCA5A5) else Color.White
+                )
+                Text(
+                  text = "1 entre você e os $botCount bots é o Fantasma disfarçado! Denuncie e vote para banir!",
+                  fontSize = 10.sp,
+                  color = Color(0xFFCBD5E1)
+                )
+              }
+              Switch(
+                checked = secretMode,
+                onCheckedChange = { secretMode = it },
+                colors = SwitchDefaults.colors(
+                  checkedThumbColor = Color.White,
+                  checkedTrackColor = Color(0xFFDC2626)
+                )
+              )
+            }
+          }
+        } else {
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "💡 Selecione mais de 2 bots (3+) para liberar o Modo Secreto!",
+            fontSize = 11.sp,
+            color = Color(0xFF94A3B8)
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        val effectiveSecret = botCount > 2 && secretMode
+        Button(
+          onClick = { onStart(botCount, effectiveSecret) },
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (effectiveSecret) Color(0xFFDC2626) else Color(0xFF059669)
+          ),
+          shape = RoundedCornerShape(14.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .testTag("menu_bots_start_button")
+        ) {
+          Text(
+            text = if (effectiveSecret) "🕵️ Jogar Modo Secreto ($botCount Bots)" else "▶️ Jogar com $botCount Bot(s)!",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Black,
+            color = Color.White
+          )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        TextButton(
+          onClick = onDismiss,
+          modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+        ) {
+          Text("Cancelar", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
         }
       }
     }

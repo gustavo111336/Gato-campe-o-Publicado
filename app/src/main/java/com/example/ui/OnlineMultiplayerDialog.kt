@@ -74,11 +74,12 @@ fun OnlineMultiplayerDialog(
       shape = RoundedCornerShape(24.dp),
       colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
     ) {
+      val dialogScrollState = rememberScrollState()
       Column(
         modifier = Modifier
           .fillMaxSize()
           .padding(14.dp)
-          .verticalScroll(rememberScrollState())
+          .verticalScroll(dialogScrollState)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -93,7 +94,7 @@ fun OnlineMultiplayerDialog(
               color = Color(0xFF38BDF8)
             )
             Text(
-              text = "Salas até 200 players • Replays gravados • Nuvem • Amigos",
+              text = "Salas até 200 players • Bots se estiver sozinho • Nuvem",
               fontSize = 11.sp,
               color = Color(0xFF94A3B8)
             )
@@ -113,6 +114,7 @@ fun OnlineMultiplayerDialog(
             onlineVm = onlineVm,
             uiState = uiState,
             initialTab = initialTab,
+            scrollState = dialogScrollState,
             onExportCloudSave = onExportCloudSave,
             onApplyCloudSave = onApplyCloudSave,
             onClaimSharedSkin = onClaimSharedSkin,
@@ -227,6 +229,7 @@ private fun AuthenticatedMultiplayerLobby(
   onlineVm: OnlineMultiplayerViewModel,
   uiState: GameUiState,
   initialTab: OnlineLobbyTab = OnlineLobbyTab.ROOMS,
+  scrollState: androidx.compose.foundation.ScrollState,
   onExportCloudSave: () -> CloudSavePayload,
   onApplyCloudSave: (UserProfile) -> Unit,
   onClaimSharedSkin: (String) -> Unit,
@@ -251,6 +254,10 @@ private fun AuthenticatedMultiplayerLobby(
 
   var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
 
+  LaunchedEffect(activeRoom?.code, selectedTab) {
+    scrollState.scrollTo(0)
+  }
+
   val loadedProfile = (profileState as? OnlineLoadState.Success)?.data
   var usernameInput by remember(loadedProfile?.username, user.uid) {
     mutableStateOf(
@@ -259,82 +266,118 @@ private fun AuthenticatedMultiplayerLobby(
     )
   }
 
-  // Account & Username Compact Banner
-  Surface(
-    shape = RoundedCornerShape(16.dp),
-    color = Color(0xFF1E293B),
-    border = BorderStroke(1.dp, Color(0xFF10B981)),
-    modifier = Modifier.fillMaxWidth()
-  ) {
-    Column(modifier = Modifier.padding(10.dp)) {
+  val compactAccountHeader = selectedTab == OnlineLobbyTab.ROOMS && activeRoom != null
+  if (compactAccountHeader) {
+    Surface(
+      shape = RoundedCornerShape(12.dp),
+      color = Color(0xFF1E293B),
+      border = BorderStroke(1.dp, Color(0xFF10B981)),
+      modifier = Modifier.fillMaxWidth()
+    ) {
       Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text(
-            text = "✅ Conta Google Conectada",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Black,
-            color = Color(0xFF4ADE80)
-          )
-          Text(
-            text = user.email ?: "Conta Google Verificada",
-            fontSize = 11.sp,
-            color = Color(0xFFCBD5E1),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-        }
-        OutlinedButton(
+        Text(
+          text = "✅ @${usernameInput.ifBlank { onlineVm.suggestedUsername() }}",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold,
+          color = Color(0xFF4ADE80),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f)
+        )
+        TextButton(
           onClick = {
             onlineVm.leaveRoom()
             signOutGoogleAccount(credentialManager, scope)
           },
-          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-          border = BorderStroke(1.dp, Color(0xFFEF4444)),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
           modifier = Modifier.defaultMinSize(minHeight = 48.dp)
         ) {
           Text("Sair Conta", fontSize = 11.sp, color = Color(0xFFFCA5A5), fontWeight = FontWeight.Bold)
         }
       }
-
-      Spacer(modifier = Modifier.height(6.dp))
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        OutlinedTextField(
-          value = usernameInput,
-          onValueChange = { usernameInput = it.take(24) },
-          label = { Text("Seu @usuário", fontSize = 11.sp) },
-          singleLine = true,
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedBorderColor = Color(0xFF4ADE80),
-            unfocusedBorderColor = Color(0xFF475569)
-          ),
-          modifier = Modifier.weight(1f)
-        )
-        Button(
-          onClick = {
-            onlineVm.saveUsername(
-              username = usernameInput,
-              level = uiState.playerLevel,
-              wins = uiState.championCount,
-              selectedSkinId = uiState.selectedSkinId
-            )
-          },
-          enabled = !isBusy,
-          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.height(50.dp)
+    }
+  } else {
+    // Account & Username Compact Banner
+    Surface(
+      shape = RoundedCornerShape(16.dp),
+      color = Color(0xFF1E293B),
+      border = BorderStroke(1.dp, Color(0xFF10B981)),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      Column(modifier = Modifier.padding(10.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Text("Salvar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = "✅ Conta Google Conectada",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Black,
+              color = Color(0xFF4ADE80)
+            )
+            Text(
+              text = user.email ?: "Conta Google Verificada",
+              fontSize = 11.sp,
+              color = Color(0xFFCBD5E1),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+          OutlinedButton(
+            onClick = {
+              onlineVm.leaveRoom()
+              signOutGoogleAccount(credentialManager, scope)
+            },
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            border = BorderStroke(1.dp, Color(0xFFEF4444)),
+            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+          ) {
+            Text("Sair Conta", fontSize = 11.sp, color = Color(0xFFFCA5A5), fontWeight = FontWeight.Bold)
+          }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedTextField(
+            value = usernameInput,
+            onValueChange = { usernameInput = it.take(24) },
+            label = { Text("Seu @usuário", fontSize = 11.sp) },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White,
+              focusedBorderColor = Color(0xFF4ADE80),
+              unfocusedBorderColor = Color(0xFF475569)
+            ),
+            modifier = Modifier.weight(1f)
+          )
+          Button(
+            onClick = {
+              onlineVm.saveUsername(
+                username = usernameInput,
+                level = uiState.playerLevel,
+                wins = uiState.championCount,
+                selectedSkinId = uiState.selectedSkinId
+              )
+            },
+            enabled = !isBusy,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.height(50.dp)
+          ) {
+            Text("Salvar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
         }
       }
     }
@@ -479,6 +522,9 @@ private fun RoomsTabContent(
   var selectedMaxPlayers by remember { mutableIntStateOf(100) }
   var selectedRoomDifficulty by remember { mutableStateOf("NORMAL") }
   var selectedSecretMode by remember { mutableStateOf(false) }
+  var preselectedPlayWithBots by remember { mutableStateOf(false) }
+  var preselectedBotCount by remember { mutableIntStateOf(3) }
+  var preselectedBotsSecretMode by remember { mutableStateOf(false) }
 
   if (activeRoom != null) {
     ActiveRoomCard(
@@ -486,6 +532,9 @@ private fun RoomsTabContent(
       roomPlayers = roomPlayers,
       currentUserId = user.uid,
       isBusy = isBusy,
+      initialPlayWithBots = preselectedPlayWithBots,
+      initialBotCount = preselectedBotCount,
+      initialBotsSecretMode = preselectedBotsSecretMode || activeRoom.isSecretMode,
       onVoteGhost = { targetUid ->
         onlineVm.castGhostVote(targetUid, uiState.selectedSkinId)
       },
@@ -641,6 +690,125 @@ private fun RoomsTabContent(
               checkedTrackColor = Color(0xFFDC2626)
             )
           )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Surface(
+        onClick = { preselectedPlayWithBots = !preselectedPlayWithBots },
+        shape = RoundedCornerShape(12.dp),
+        color = if (preselectedPlayWithBots) Color(0xFF0F2942) else Color(0xFF1E293B),
+        border = BorderStroke(
+          width = if (preselectedPlayWithBots) 1.5.dp else 1.dp,
+          color = if (preselectedPlayWithBots) Color(0xFF38BDF8) else Color(0xFF334155)
+        ),
+        modifier = Modifier
+          .fillMaxWidth()
+          .defaultMinSize(minHeight = 48.dp)
+          .testTag("lobby_play_with_bots_toggle")
+      ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text(
+                text = "🤖 Jogar com Bots (Se Estiver Sozinho)",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                color = if (preselectedPlayWithBots) Color(0xFF38BDF8) else Color.White
+              )
+              Text(
+                text = "Ative para definir a quantidade de bots ao ficar sozinho na sala pública ou privada.",
+                fontSize = 10.sp,
+                color = Color(0xFFCBD5E1),
+                lineHeight = 13.sp
+              )
+            }
+            Switch(
+              checked = preselectedPlayWithBots,
+              onCheckedChange = { preselectedPlayWithBots = it },
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF0284C7)
+              )
+            )
+          }
+
+          if (preselectedPlayWithBots) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              listOf(1, 2, 3, 5, 8, 12, 20).forEach { countPreset ->
+                FilterChip(
+                  selected = preselectedBotCount == countPreset,
+                  onClick = { preselectedBotCount = countPreset },
+                  label = { Text("$countPreset bot(s)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("lobby_bot_count_chip_$countPreset")
+                )
+              }
+            }
+
+            if (preselectedBotCount > 2) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Surface(
+                onClick = { preselectedBotsSecretMode = !preselectedBotsSecretMode },
+                shape = RoundedCornerShape(10.dp),
+                color = if (preselectedBotsSecretMode) Color(0xFF450A0A) else Color(0xFF0F172A),
+                border = BorderStroke(
+                  width = if (preselectedBotsSecretMode) 1.5.dp else 1.dp,
+                  color = if (preselectedBotsSecretMode) Color(0xFFEF4444) else Color(0xFF475569)
+                ),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .defaultMinSize(minHeight = 48.dp)
+                  .testTag("lobby_bots_secret_toggle")
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                  Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                      text = "🕵️ Modo Secreto (Mais de 2 Bots)",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Black,
+                      color = if (preselectedBotsSecretMode) Color(0xFFFCA5A5) else Color.White
+                    )
+                    Text(
+                      text = "1 entre você e os $preselectedBotCount bots vira Fantasma disfarçado!",
+                      fontSize = 10.sp,
+                      color = Color(0xFFCBD5E1)
+                    )
+                  }
+                  Switch(
+                    checked = preselectedBotsSecretMode,
+                    onCheckedChange = { preselectedBotsSecretMode = it },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.White,
+                      checkedTrackColor = Color(0xFFDC2626)
+                    )
+                  )
+                }
+              }
+            } else {
+              Text(
+                text = "💡 Escolha 3+ bots para liberar o Modo Secreto!",
+                fontSize = 10.sp,
+                color = Color(0xFF94A3B8)
+              )
+            }
+          }
         }
       }
     }
@@ -833,17 +1001,22 @@ private fun ActiveRoomCard(
   roomPlayers: List<RoomPlayer>,
   currentUserId: String,
   isBusy: Boolean,
+  initialPlayWithBots: Boolean = false,
+  initialBotCount: Int = 3,
+  initialBotsSecretMode: Boolean = room.isSecretMode,
   onVoteGhost: (String) -> Unit,
   onStartMatch: (MultiplayerBotLaunchConfig) -> Unit,
   onLeaveRoom: () -> Unit
 ) {
   val isElite = room.difficulty == "ELITE"
   val isSecret = room.isSecretMode
-  val totalPlayersInRoom = maxOf(roomPlayers.size, room.playerCount.toInt())
-  val isSoloInRoom = totalPlayersInRoom <= 1
-  var playWithBots by remember(room.code) { mutableStateOf(false) }
-  var botCount by remember(room.code) { mutableIntStateOf(3) }
-  var botsSecretMode by remember(room.code) { mutableStateOf(room.isSecretMode) }
+  val otherPlayers = roomPlayers.filter { it.userId.isNotBlank() && it.userId != currentUserId }
+  val displayPlayersCount = if (roomPlayers.isNotEmpty()) roomPlayers.size else room.playerCount.toInt().coerceAtLeast(1)
+  val isSoloInRoom = if (roomPlayers.isNotEmpty()) otherPlayers.isEmpty() else room.playerCount <= 1L
+
+  var playWithBots by remember(room.code) { mutableStateOf(initialPlayWithBots) }
+  var botCount by remember(room.code) { mutableIntStateOf(initialBotCount.coerceIn(1, 20)) }
+  var botsSecretMode by remember(room.code) { mutableStateOf(initialBotsSecretMode) }
 
   LaunchedEffect(isSoloInRoom) {
     if (!isSoloInRoom && playWithBots) {
@@ -894,7 +1067,7 @@ private fun ActiveRoomCard(
           color = Color(0xFFFDE047)
         )
         Text(
-          text = "👥 ${roomPlayers.size.coerceAtLeast(room.playerCount.toInt())}/${room.maxPlayers} players",
+          text = "👥 $displayPlayersCount/${room.maxPlayers} players",
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
           color = Color(0xFF38BDF8)
@@ -903,143 +1076,20 @@ private fun ActiveRoomCard(
 
       Text(
         text = "Código: ${room.code} • ${room.difficulty}${if (isSecret) " • 🕵️ SECRETO" else ""}",
-        fontSize = 19.sp,
+        fontSize = 18.sp,
         fontWeight = FontWeight.Black,
         color = Color.White,
         letterSpacing = 1.sp
       )
 
-      if (isSecret) {
-        Spacer(modifier = Modifier.height(6.dp))
-        val isLocalSecretImpostor = room.ghostPlayerUserId == currentUserId
-        Surface(
-          shape = RoundedCornerShape(10.dp),
-          color = if (isLocalSecretImpostor) Color(0xFF7F1D1D) else Color(0xFF1E293B),
-          border = BorderStroke(1.dp, if (isLocalSecretImpostor) Color(0xFFFCA5A5) else Color(0xFF38BDF8)),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          val bannerText = when {
-            isLocalSecretImpostor -> "🎭 MODO SECRETO: Você é o Fantasma Impostor disfarçado de gato! Entre na arena e use 🗡️ Matar sem ser descoberto!"
-            room.ghostPlayerUserId.isNotBlank() -> "🕵️ MODO SECRETO ATIVO: 1 jogador aqui dentro é o Fantasma disfarçado! Observe bem e aperte 🚨 Denunciar se suspeitar!"
-            else -> "🕵️ MODO SECRETO ATIVO: Quando houver 2+ jogadores na sala, 1 será sorteado aleatoriamente como Fantasma disfarçado!"
-          }
-          Text(
-            text = bannerText,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.padding(8.dp)
-          )
-        }
-      }
-
-      if (isElite && !isSecret) {
-        Spacer(modifier = Modifier.height(6.dp))
-        Surface(
-          shape = RoundedCornerShape(10.dp),
-          color = Color(0xFF3B0764),
-          border = BorderStroke(1.dp, Color(0xFFA855F7)),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          Text(
-            text = "👻 MODO ELITE POR VOTOS: Vote em quem será o Fantasma! Fantasma atual: @$electedGhostName",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFE9D5FF),
-            modifier = Modifier.padding(8.dp)
-          )
-        }
-      }
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      if (roomPlayers.isEmpty()) {
-        Text(
-          text = "Conectando lista de jogadores...",
-          fontSize = 12.sp,
-          color = Color(0xFFCBD5E1)
-        )
-      } else {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          roomPlayers.forEach { p ->
-            val isGhostRole = !isSecret && isElite && (p.userId == room.ghostPlayerUserId || p.role == "ghost")
-            val isDead = eliminatedSet.contains(p.userId)
-            val isMe = p.userId == currentUserId
-            Surface(
-              shape = RoundedCornerShape(10.dp),
-              color = when {
-                isDead -> Color(0xFF0F172A)
-                isGhostRole -> Color(0xFF4C1D95)
-                else -> Color(0xFF1E293B)
-              },
-              border = BorderStroke(1.dp, if (isMe) Color(0xFF38BDF8) else Color(0xFF334155)),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Column(modifier = Modifier.weight(1f)) {
-                  val roleIcon = when {
-                    isDead -> "💀 Eliminado"
-                    isGhostRole -> "👻 Fantasma"
-                    else -> "🐱 Gato"
-                  }
-                  Text(
-                    text = "$roleIcon • @${p.username}${if (isMe) " (Você)" else ""}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDead) Color(0xFF94A3B8) else Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                  )
-                  val votesForPlayer = voteCounts[p.userId] ?: 0
-                  Text(
-                    text = "🐾 ${p.score} pts${if (isElite && !isSecret) " • 🗳️ $votesForPlayer voto(s)" else ""}",
-                    fontSize = 10.sp,
-                    color = Color(0xFF94A3B8)
-                  )
-                }
-
-                if (isElite && !isSecret) {
-                  Button(
-                    onClick = { onVoteGhost(p.userId) },
-                    enabled = !isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9333EA)),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                      .defaultMinSize(minHeight = 48.dp)
-                      .testTag("vote_ghost_${p.userId}")
-                  ) {
-                    Text("🗳️ Votar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (room.status == "finished" && room.winnerUsername.isNotBlank()) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-          text = "🏆 Vencedor da Sala: @${room.winnerUsername}!",
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Black,
-          color = Color(0xFFFDE047)
-        )
-      }
-
       if (isSoloInRoom) {
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Surface(
           shape = RoundedCornerShape(14.dp),
           color = if (playWithBots) Color(0xFF0F2942) else Color(0xFF131C2E),
           border = BorderStroke(
-            width = if (playWithBots) 1.5.dp else 1.dp,
-            color = if (playWithBots) Color(0xFF38BDF8) else Color(0xFF334155)
+            width = if (playWithBots) 2.dp else 1.5.dp,
+            color = if (playWithBots) Color(0xFF38BDF8) else Color(0xFF2DD4BF)
           ),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -1061,9 +1111,9 @@ private fun ActiveRoomCard(
                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                   Text(
                     text = "🤖 Jogar com Bots",
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Black,
-                    color = if (playWithBots) Color(0xFF38BDF8) else Color.White
+                    color = if (playWithBots) Color(0xFF38BDF8) else Color(0xFF2DD4BF)
                   )
                   Text(
                     text = "Você está sozinho nesta sala! Ative para definir quantos bots quer e jogar agora.",
@@ -1213,6 +1263,13 @@ private fun ActiveRoomCard(
             }
           }
         }
+      } else {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          text = "ℹ️ 'Jogar com Bots' fica disponível automaticamente quando você estiver sozinho na sala.",
+          fontSize = 10.sp,
+          color = Color(0xFF94A3B8)
+        )
       }
 
       Spacer(modifier = Modifier.height(10.dp))
@@ -1242,14 +1299,137 @@ private fun ActiveRoomCard(
           effectiveBotsSecret -> "🕵️ Jogar Modo Secreto com $botCount Bots!"
           effectiveBotsLaunch -> "🤖 Jogar com $botCount Bot(s)!"
           isSecret && room.ghostPlayerUserId == currentUserId -> "🎭 Entrar como IMPOSTOR Disfarçado!"
-          isSecret -> "🕵️ Entrar na Partida Secreta! (${roomPlayers.size}/${room.maxPlayers})"
+          isSecret -> "🕵️ Entrar na Partida Secreta! ($displayPlayersCount/${room.maxPlayers})"
           isElite && room.ghostPlayerUserId == currentUserId -> "👻 Entrar na Arena como FANTASMA!"
-          else -> "▶️ Entrar na Arena Agora! (${roomPlayers.size}/${room.maxPlayers})"
+          else -> "▶️ Entrar na Arena Agora! ($displayPlayersCount/${room.maxPlayers})"
         }
         Text(label, fontSize = 13.sp, fontWeight = FontWeight.Black, color = Color.White)
       }
 
-      Spacer(modifier = Modifier.height(6.dp))
+      if (isSecret) {
+        Spacer(modifier = Modifier.height(8.dp))
+        val isLocalSecretImpostor = room.ghostPlayerUserId == currentUserId
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = if (isLocalSecretImpostor) Color(0xFF7F1D1D) else Color(0xFF1E293B),
+          border = BorderStroke(1.dp, if (isLocalSecretImpostor) Color(0xFFFCA5A5) else Color(0xFF38BDF8)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          val bannerText = when {
+            isLocalSecretImpostor -> "🎭 MODO SECRETO: Você é o Fantasma Impostor disfarçado de gato! Entre na arena e use 🗡️ Matar sem ser descoberto!"
+            room.ghostPlayerUserId.isNotBlank() -> "🕵️ MODO SECRETO ATIVO: 1 jogador aqui dentro é o Fantasma disfarçado! Observe bem e aperte 🚨 Denunciar se suspeitar!"
+            else -> "🕵️ MODO SECRETO ATIVO: Quando houver 2+ jogadores na sala, 1 será sorteado aleatoriamente como Fantasma disfarçado!"
+          }
+          Text(
+            text = bannerText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(8.dp)
+          )
+        }
+      }
+
+      if (isElite && !isSecret) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = Color(0xFF3B0764),
+          border = BorderStroke(1.dp, Color(0xFFA855F7)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = "👻 MODO ELITE POR VOTOS: Vote em quem será o Fantasma! Fantasma atual: @$electedGhostName",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFE9D5FF),
+            modifier = Modifier.padding(8.dp)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      if (roomPlayers.isEmpty()) {
+        Text(
+          text = "Conectando lista de jogadores...",
+          fontSize = 12.sp,
+          color = Color(0xFFCBD5E1)
+        )
+      } else {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          roomPlayers.forEach { p ->
+            val isGhostRole = !isSecret && isElite && (p.userId == room.ghostPlayerUserId || p.role == "ghost")
+            val isDead = eliminatedSet.contains(p.userId)
+            val isMe = p.userId == currentUserId
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = when {
+                isDead -> Color(0xFF0F172A)
+                isGhostRole -> Color(0xFF4C1D95)
+                else -> Color(0xFF1E293B)
+              },
+              border = BorderStroke(1.dp, if (isMe) Color(0xFF38BDF8) else Color(0xFF334155)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  val roleIcon = when {
+                    isDead -> "💀 Eliminado"
+                    isGhostRole -> "👻 Fantasma"
+                    else -> "🐱 Gato"
+                  }
+                  Text(
+                    text = "$roleIcon • @${p.username}${if (isMe) " (Você)" else ""}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDead) Color(0xFF94A3B8) else Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                  val votesForPlayer = voteCounts[p.userId] ?: 0
+                  Text(
+                    text = "🐾 ${p.score} pts${if (isElite && !isSecret) " • 🗳️ $votesForPlayer voto(s)" else ""}",
+                    fontSize = 10.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                }
+
+                if (isElite && !isSecret) {
+                  Button(
+                    onClick = { onVoteGhost(p.userId) },
+                    enabled = !isBusy,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9333EA)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                      .defaultMinSize(minHeight = 48.dp)
+                      .testTag("vote_ghost_${p.userId}")
+                  ) {
+                    Text("🗳️ Votar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (room.status == "finished" && room.winnerUsername.isNotBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+          text = "🏆 Vencedor da Sala: @${room.winnerUsername}!",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.Black,
+          color = Color(0xFFFDE047)
+        )
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
 
       OutlinedButton(
         onClick = onLeaveRoom,

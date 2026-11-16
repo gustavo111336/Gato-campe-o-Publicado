@@ -19,10 +19,12 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun PauseOverlay(
   hasRecordedReplay: Boolean = false,
+  showSoloRoomBotsOption: Boolean = false,
   onResume: () -> Unit,
   onRestart: () -> Unit,
   onReturnToMenu: () -> Unit,
   onOpenSettings: () -> Unit,
+  onOpenRoomBots: () -> Unit = {},
   onPostReplay: () -> Unit = {},
   onOpenVideosFeed: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -77,6 +79,18 @@ fun PauseOverlay(
           modifier = Modifier.fillMaxWidth().height(48.dp).testTag("resume_button")
         ) {
           Text("Continuar Jogando ▶️", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+
+        if (showSoloRoomBotsOption) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Button(
+            onClick = onOpenRoomBots,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp).testTag("room_bots_from_pause_button")
+          ) {
+            Text("🤖 Jogar com Bots nesta Sala", fontSize = 13.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
         }
 
         if (hasRecordedReplay) {

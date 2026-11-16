@@ -407,6 +407,7 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
       .map { snap ->
         snap.toObjects(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
           .filter { it.playerCount < it.maxPlayers }
+          .sortedByDescending { it.updatedAt?.toDate()?.time ?: 0L }
       }
       .catch { error ->
         val firestoreError = generateSequence(error) { it.cause }
@@ -652,9 +653,16 @@ class MultiplayerRepository(private val db: FirebaseFirestore) {
         .get()
         .await()
       val rooms = snap.toObjects(MultiplayerRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-      val candidate = rooms
+      val nowMs = System.currentTimeMillis()
+      val activeRooms = rooms
+        .filter { room ->
+          val updatedMs = room.updatedAt?.toDate()?.time ?: nowMs
+          (nowMs - updatedMs) <= 180_000L
+        }
+        .sortedByDescending { it.updatedAt?.toDate()?.time ?: 0L }
+      val candidate = activeRooms
         .firstOrNull { it.playerCount < it.maxPlayers && it.isSecretMode == preferredSecretMode && it.hostUserId != userId }
-        ?: rooms.firstOrNull { it.playerCount < it.maxPlayers && it.isSecretMode == preferredSecretMode }
+        ?: activeRooms.firstOrNull { it.playerCount < it.maxPlayers && it.isSecretMode == preferredSecretMode }
 
       if (candidate != null) {
         val joined = joinRoomByCode(candidate.code, userId, username, skinId)
