@@ -280,7 +280,9 @@ fun GameCanvas(
             gameTime = frameTime,
             textPaint = textPaint,
             is3d = is3d,
-            showLabel = nearestBotIds.contains(bot.id)
+            showLabel = nearestBotIds.contains(bot.id) || !bot.isAlive,
+            goalCats = uiState.goalCats,
+            isSecretMode = uiState.isBotSecretMode
           )
         }
 
@@ -423,6 +425,9 @@ fun GameCanvas(
 
       val targetPos: Vector2D? = if (uiState.isPlayerGhost || engine.isPlayerGhost) {
         engine.snapshotAiRunnerCat()?.position
+          ?: engine.snapshotBots()
+            .filter { it.isAlive && !it.isSecretImpostor }
+            .minByOrNull { (it.position - heroPos).length() }?.position
           ?: engine.snapshotRemotePlayers()
             .filter { it.role != "ghost" && !uiState.eliminatedUserIds.contains(it.userId) }
             .minByOrNull { (it.position - heroPos).length() }?.position
@@ -604,49 +609,68 @@ private fun DrawScope.drawBotCat(
   gameTime: Float,
   textPaint: Paint,
   is3d: Boolean,
-  showLabel: Boolean
+  showLabel: Boolean,
+  goalCats: Int = 50,
+  isSecretMode: Boolean = false
 ) {
   val lift = if (is3d) -9f else 0f
   val center = Offset(bot.position.x, bot.position.y + lift)
 
-  if (bot.invincibleTimer > 0f && (gameTime * 14f).toInt() % 2 == 0) {
+  if (bot.isAlive && bot.invincibleTimer > 0f && (gameTime * 14f).toInt() % 2 == 0) {
     return
   }
 
   if (is3d) {
     drawOval(
-      color = Color.Black.copy(alpha = 0.36f),
+      color = Color.Black.copy(alpha = if (!bot.isAlive) 0.18f else 0.36f),
       topLeft = Offset(bot.position.x - 19f, bot.position.y + 8f),
       size = Size(38f, 16f)
     )
   }
 
-  val haloR = 30f + sin(gameTime * 6f + bot.id) * 3f
-  drawCircle(color = bot.furColor.copy(alpha = 0.24f), radius = haloR, center = center)
-  drawCircle(color = bot.furColor, radius = 19f, center = center)
-  drawCircle(color = Color.White, radius = 19f, center = center, style = Stroke(width = 2f))
+  if (!bot.isAlive) {
+    drawCircle(color = Color(0xFF94A3B8).copy(alpha = 0.28f), radius = 19f, center = center)
+    drawCircle(color = Color(0xFFEF4444).copy(alpha = 0.55f), radius = 19f, center = center, style = Stroke(width = 2f))
+  } else {
+    val skin = if (isSecretMode) ALL_HERO_SKINS.find { it.id == bot.skinId } else null
+    val bodyColor = skin?.furColor ?: bot.furColor
+    val earColor = skin?.earColor ?: bot.furColor
+    val haloR = 30f + sin(gameTime * 6f + bot.id) * 3f
+    drawCircle(color = bodyColor.copy(alpha = 0.24f), radius = haloR, center = center)
+    drawCircle(color = bodyColor, radius = 19f, center = center)
+    drawCircle(color = Color.White, radius = 19f, center = center, style = Stroke(width = 2f))
 
-  val earPath = Path().apply {
-    moveTo(center.x - 11f, center.y - 10f)
-    lineTo(center.x - 15f, center.y - 24f)
-    lineTo(center.x - 3f, center.y - 14f)
-    close()
-    moveTo(center.x + 3f, center.y - 14f)
-    lineTo(center.x + 15f, center.y - 24f)
-    lineTo(center.x + 11f, center.y - 10f)
-    close()
+    val earPath = Path().apply {
+      moveTo(center.x - 11f, center.y - 10f)
+      lineTo(center.x - 15f, center.y - 24f)
+      lineTo(center.x - 3f, center.y - 14f)
+      close()
+      moveTo(center.x + 3f, center.y - 14f)
+      lineTo(center.x + 15f, center.y - 24f)
+      lineTo(center.x + 11f, center.y - 10f)
+      close()
+    }
+    drawPath(earPath, color = earColor)
+    drawCircle(Color(0xFF0F172A), 2.8f, Offset(center.x - 5.5f, center.y - 2.5f))
+    drawCircle(Color(0xFF0F172A), 2.8f, Offset(center.x + 5.5f, center.y - 2.5f))
   }
-  drawPath(earPath, color = bot.furColor)
-  drawCircle(Color(0xFF0F172A), 2.8f, Offset(center.x - 5.5f, center.y - 2.5f))
-  drawCircle(Color(0xFF0F172A), 2.8f, Offset(center.x + 5.5f, center.y - 2.5f))
 
   if (showLabel) {
     val savedColor = textPaint.color
     val savedSize = textPaint.textSize
-    textPaint.color = android.graphics.Color.YELLOW
+    textPaint.color = when {
+      !bot.isAlive -> android.graphics.Color.LTGRAY
+      isSecretMode -> android.graphics.Color.CYAN
+      else -> android.graphics.Color.YELLOW
+    }
     textPaint.textSize = 20f
+    val labelText = when {
+      !bot.isAlive -> "💀 ${bot.name}"
+      isSecretMode -> "@${bot.name} (${bot.catsCollected})"
+      else -> "${bot.accentEmoji} ${bot.name} (${bot.catsCollected}/$goalCats)"
+    }
     drawContext.canvas.nativeCanvas.drawText(
-      "${bot.accentEmoji} ${bot.name} (${bot.catsCollected}/50)",
+      labelText,
       center.x,
       center.y - 32f,
       textPaint

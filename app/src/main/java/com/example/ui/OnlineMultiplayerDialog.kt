@@ -44,6 +44,12 @@ enum class OnlineLobbyTab(val label: String) {
   VIDEOS("📺 Vídeos & Feed")
 }
 
+data class MultiplayerBotLaunchConfig(
+  val playWithBots: Boolean = false,
+  val botCount: Int = 3,
+  val secretModeWithBots: Boolean = false
+)
+
 @Composable
 fun OnlineMultiplayerDialog(
   currentUser: FirebaseUser?,
@@ -53,7 +59,7 @@ fun OnlineMultiplayerDialog(
   onExportCloudSave: () -> CloudSavePayload,
   onApplyCloudSave: (UserProfile) -> Unit,
   onClaimSharedSkin: (String) -> Unit,
-  onStartMultiplayerMatch: () -> Unit,
+  onStartMultiplayerMatch: (MultiplayerBotLaunchConfig) -> Unit,
   onDismiss: () -> Unit
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -224,7 +230,7 @@ private fun AuthenticatedMultiplayerLobby(
   onExportCloudSave: () -> CloudSavePayload,
   onApplyCloudSave: (UserProfile) -> Unit,
   onClaimSharedSkin: (String) -> Unit,
-  onStartMultiplayerMatch: () -> Unit
+  onStartMultiplayerMatch: (MultiplayerBotLaunchConfig) -> Unit
 ) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -467,7 +473,7 @@ private fun RoomsTabContent(
   roomPlayers: List<RoomPlayer>,
   publicRoomsState: OnlineLoadState<List<MultiplayerRoom>>,
   isBusy: Boolean,
-  onStartMultiplayerMatch: () -> Unit
+  onStartMultiplayerMatch: (MultiplayerBotLaunchConfig) -> Unit
 ) {
   var joinCodeInput by remember { mutableStateOf("") }
   var selectedMaxPlayers by remember { mutableIntStateOf(100) }
@@ -828,11 +834,23 @@ private fun ActiveRoomCard(
   currentUserId: String,
   isBusy: Boolean,
   onVoteGhost: (String) -> Unit,
-  onStartMatch: () -> Unit,
+  onStartMatch: (MultiplayerBotLaunchConfig) -> Unit,
   onLeaveRoom: () -> Unit
 ) {
   val isElite = room.difficulty == "ELITE"
   val isSecret = room.isSecretMode
+  val totalPlayersInRoom = maxOf(roomPlayers.size, room.playerCount.toInt())
+  val isSoloInRoom = totalPlayersInRoom <= 1
+  var playWithBots by remember(room.code) { mutableStateOf(false) }
+  var botCount by remember(room.code) { mutableIntStateOf(3) }
+  var botsSecretMode by remember(room.code) { mutableStateOf(room.isSecretMode) }
+
+  LaunchedEffect(isSoloInRoom) {
+    if (!isSoloInRoom && playWithBots) {
+      playWithBots = false
+    }
+  }
+
   val eliminatedSet = remember(room.eliminatedUserIdsCsv) {
     room.eliminatedUserIdsCsv
       .split(",")
@@ -1014,11 +1032,206 @@ private fun ActiveRoomCard(
         )
       }
 
+      if (isSoloInRoom) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = if (playWithBots) Color(0xFF0F2942) else Color(0xFF131C2E),
+          border = BorderStroke(
+            width = if (playWithBots) 1.5.dp else 1.dp,
+            color = if (playWithBots) Color(0xFF38BDF8) else Color(0xFF334155)
+          ),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Surface(
+              onClick = { playWithBots = !playWithBots },
+              shape = RoundedCornerShape(10.dp),
+              color = Color.Transparent,
+              modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp)
+                .testTag("play_with_bots_toggle")
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(
+                    text = "🤖 Jogar com Bots",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    color = if (playWithBots) Color(0xFF38BDF8) else Color.White
+                  )
+                  Text(
+                    text = "Você está sozinho nesta sala! Ative para definir quantos bots quer e jogar agora.",
+                    fontSize = 10.sp,
+                    color = Color(0xFFCBD5E1),
+                    lineHeight = 13.sp
+                  )
+                }
+                Switch(
+                  checked = playWithBots,
+                  onCheckedChange = { playWithBots = it },
+                  colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF0284C7)
+                  )
+                )
+              }
+            }
+
+            if (playWithBots) {
+              Spacer(modifier = Modifier.height(8.dp))
+              Text(
+                text = "⚙️ Quantidade de Bots: $botCount bot(s)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFDE047)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                OutlinedButton(
+                  onClick = { botCount = (botCount - 1).coerceAtLeast(1) },
+                  enabled = botCount > 1,
+                  border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(0.dp),
+                  modifier = Modifier
+                    .size(48.dp)
+                    .testTag("bots_count_decrease")
+                ) {
+                  Text("−", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
+                }
+                Surface(
+                  shape = RoundedCornerShape(10.dp),
+                  color = Color(0xFF0F172A),
+                  border = BorderStroke(1.dp, Color(0xFF475569)),
+                  modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Text(
+                      text = "$botCount Bot(s)",
+                      fontSize = 14.sp,
+                      fontWeight = FontWeight.Black,
+                      color = Color.White,
+                      modifier = Modifier.testTag("bots_count_value")
+                    )
+                  }
+                }
+                OutlinedButton(
+                  onClick = { botCount = (botCount + 1).coerceAtMost(20) },
+                  enabled = botCount < 20,
+                  border = BorderStroke(1.dp, Color(0xFF38BDF8)),
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(0.dp),
+                  modifier = Modifier
+                    .size(48.dp)
+                    .testTag("bots_count_increase")
+                ) {
+                  Text("+", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White)
+                }
+              }
+
+              Spacer(modifier = Modifier.height(6.dp))
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                listOf(1, 2, 3, 5, 8, 12, 20).forEach { countPreset ->
+                  FilterChip(
+                    selected = botCount == countPreset,
+                    onClick = { botCount = countPreset },
+                    label = { Text("$countPreset", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                    modifier = Modifier
+                      .defaultMinSize(minHeight = 48.dp)
+                      .testTag("bot_count_chip_$countPreset")
+                  )
+                }
+              }
+
+              if (botCount > 2) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                  onClick = { botsSecretMode = !botsSecretMode },
+                  shape = RoundedCornerShape(10.dp),
+                  color = if (botsSecretMode) Color(0xFF450A0A) else Color(0xFF1E293B),
+                  border = BorderStroke(
+                    width = if (botsSecretMode) 1.5.dp else 1.dp,
+                    color = if (botsSecretMode) Color(0xFFEF4444) else Color(0xFF475569)
+                  ),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("bots_secret_mode_toggle")
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                      Text(
+                        text = "🕵️ Modo Secreto (Mais de 2 Bots)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (botsSecretMode) Color(0xFFFCA5A5) else Color.White
+                      )
+                      Text(
+                        text = "1 entre você e os $botCount bots vira Fantasma disfarçado! Todos podem denunciar e votar para banir.",
+                        fontSize = 10.sp,
+                        color = Color(0xFFCBD5E1),
+                        lineHeight = 13.sp
+                      )
+                    }
+                    Switch(
+                      checked = botsSecretMode,
+                      onCheckedChange = { botsSecretMode = it },
+                      colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFDC2626)
+                      )
+                    )
+                  }
+                }
+              } else {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = "💡 Defina mais de 2 bots (3+) para liberar a opção de Modo Secreto!",
+                  fontSize = 10.sp,
+                  color = Color(0xFF94A3B8)
+                )
+              }
+            }
+          }
+        }
+      }
+
       Spacer(modifier = Modifier.height(10.dp))
 
+      val effectiveBotsLaunch = isSoloInRoom && playWithBots
+      val effectiveBotsSecret = effectiveBotsLaunch && botCount > 2 && botsSecretMode
       Button(
-        onClick = onStartMatch,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+        onClick = {
+          onStartMatch(
+            MultiplayerBotLaunchConfig(
+              playWithBots = effectiveBotsLaunch,
+              botCount = botCount,
+              secretModeWithBots = effectiveBotsSecret
+            )
+          )
+        },
+        colors = ButtonDefaults.buttonColors(
+          containerColor = if (effectiveBotsSecret) Color(0xFFDC2626) else Color(0xFF10B981)
+        ),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier
           .fillMaxWidth()
@@ -1026,6 +1239,8 @@ private fun ActiveRoomCard(
           .testTag("enter_multiplayer_arena_button")
       ) {
         val label = when {
+          effectiveBotsSecret -> "🕵️ Jogar Modo Secreto com $botCount Bots!"
+          effectiveBotsLaunch -> "🤖 Jogar com $botCount Bot(s)!"
           isSecret && room.ghostPlayerUserId == currentUserId -> "🎭 Entrar como IMPOSTOR Disfarçado!"
           isSecret -> "🕵️ Entrar na Partida Secreta! (${roomPlayers.size}/${room.maxPlayers})"
           isElite && room.ghostPlayerUserId == currentUserId -> "👻 Entrar na Arena como FANTASMA!"

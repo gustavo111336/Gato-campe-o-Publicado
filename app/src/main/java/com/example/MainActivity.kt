@@ -240,6 +240,7 @@ class MainActivity : ComponentActivity() {
             roomCode,
             isPlaying,
             uiState.gameStatus,
+            uiState.isBotsMode,
             uiState.selectedSkinId,
             activeRoomState?.status,
             activeRoomState?.ghostPlayerUserId,
@@ -250,7 +251,7 @@ class MainActivity : ComponentActivity() {
             val room = activeRoomState
             if (roomCode != null && isPlaying && room != null && room.status != "finished") {
               while (isActive) {
-                val won = uiState.gameStatus == GameStatus.VICTORY
+                val won = !uiState.isBotsMode && uiState.gameStatus == GameStatus.VICTORY
                 val role = if (room.isSecretMode) {
                   "cat"
                 } else if (room.difficulty == "ELITE" && room.ghostPlayerUserId == activeUser.uid) {
@@ -347,14 +348,22 @@ class MainActivity : ComponentActivity() {
                 viewModel.toggleRecordingGameplay()
               },
               onReportMeeting = {
-                onlineVm?.callMeeting()
+                if (uiState.isBotSecretMode) {
+                  viewModel.callBotSecretMeeting()
+                } else {
+                  onlineVm?.callMeeting()
+                }
               },
               onSecretKill = {
                 val targetUid = uiState.nearestKillTargetUid
                 val targetName = uiState.nearestKillTargetName
                 if (targetUid != null && targetName != null && uiState.secretKillCooldownRatio <= 0.01f) {
-                  viewModel.onSecretKillExecuted(targetName, targetUid)
-                  onlineVm?.killSecretVictim(targetUid, targetName)
+                  if (uiState.isBotSecretMode) {
+                    viewModel.onBotSecretKill()
+                  } else {
+                    viewModel.onSecretKillExecuted(targetName, targetUid)
+                    onlineVm?.killSecretVictim(targetUid, targetName)
+                  }
                 }
               }
             )
@@ -538,7 +547,7 @@ class MainActivity : ComponentActivity() {
                 onExportCloudSave = { viewModel.exportCloudSavePayload() },
                 onApplyCloudSave = { profile -> viewModel.applyCloudSaveProfile(profile) },
                 onClaimSharedSkin = { skinId -> viewModel.claimSharedSkin(skinId) },
-                onStartMultiplayerMatch = {
+                onStartMultiplayerMatch = { botCfg ->
                   val targetDiff = when (currentActiveRoomDiff) {
                     "CALMO" -> Difficulty.CALMO
                     "DESAFIO" -> Difficulty.DESAFIO
@@ -547,13 +556,45 @@ class MainActivity : ComponentActivity() {
                   }
                   viewModel.setDifficulty(targetDiff)
                   viewModel.openOnlineDialog(false)
-                  viewModel.startNormalGame()
+                  if (botCfg.playWithBots) {
+                    viewModel.startMultiplayerBotsGame(
+                      botCount = botCfg.botCount,
+                      secretMode = botCfg.secretModeWithBots,
+                      localUsername = onlineVm?.suggestedUsername().orEmpty().ifBlank { "Você" },
+                      roomCode = activeRoomState?.code.orEmpty()
+                    )
+                  } else {
+                    viewModel.startNormalGame()
+                  }
                 },
                 onDismiss = { viewModel.openOnlineDialog(false) }
               )
             }
 
-            if (activeUser != null && onlineVm != null && activeRoomState != null &&
+            val botMeetingRoom = uiState.botSecretMeetingRoom
+            if (botMeetingRoom != null && (botMeetingRoom.meetingStatus == "active" || botMeetingRoom.meetingStatus == "result")) {
+              LaunchedEffect(botMeetingRoom.meetingStatus) {
+                viewModel.inputVector = Vector2D(0f, 0f)
+              }
+              SecretMeetingDialog(
+                room = botMeetingRoom,
+                roomPlayers = uiState.botSecretMeetingPlayers,
+                currentUserId = "LOCAL_PLAYER",
+                isBusy = false,
+                onVoteTarget = { targetUidOrSkip ->
+                  viewModel.castBotBanishVote(targetUidOrSkip)
+                },
+                onResolveMeeting = {
+                  viewModel.resolveBotSecretMeeting()
+                },
+                onContinueAfterResult = {
+                  viewModel.dismissBotMeetingResult()
+                },
+                onLeaveToLobby = {
+                  viewModel.leaveBotSecretToLobby()
+                }
+              )
+            } else if (activeUser != null && onlineVm != null && activeRoomState != null &&
               (activeRoomState.meetingStatus == "active" || activeRoomState.meetingStatus == "result")
             ) {
               LaunchedEffect(activeRoomState.meetingStatus) {

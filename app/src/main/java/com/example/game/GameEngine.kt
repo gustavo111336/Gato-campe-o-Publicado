@@ -94,6 +94,10 @@ class GameEngine(
   var eliminatedUserIds: Set<String> = emptySet()
   var secretKillCooldownTimer = 0f
   val secretKillCooldown = 8.0f
+  var isBotSecretMode = false
+  var botSecretLocalIsImpostor = false
+  var pendingBotMeetingCaller: String? = null
+  private var botReportCooldownTimer = 0f
   private var ghostCaptureCooldownTimer = 0f
   var aiRunnerCat: AiRunnerCat? = null
 
@@ -174,7 +178,9 @@ class GameEngine(
   }
 
   val isPlayerGhost: Boolean
-    get() = if (currentMode.isBotsMode) {
+    get() = if (isBotSecretMode) {
+      botSecretLocalIsImpostor
+    } else if (currentMode.isBotsMode) {
       false
     } else if (isMultiplayerActive) {
       multiplayerRole == "ghost"
@@ -272,6 +278,56 @@ class GameEngine(
     }
   }
 
+  fun killBotInSecretMode(botUid: String): String? = synchronized(stateLock) {
+    if (!isBotSecretMode || !botSecretLocalIsImpostor || !localPlayerAlive || secretKillCooldownTimer > 0f) {
+      return null
+    }
+    val bot = bots.firstOrNull { it.uid == botUid && it.isAlive && !it.isSecretImpostor } ?: return null
+    if ((bot.position - heroPosition).length() > 260f) return null
+    bot.isAlive = false
+    bot.bodyReported = false
+    triggerSecretKillFeedback(bot.name, bot.position)
+    val aliveInnocents = bots.count { it.isAlive && !it.isSecretImpostor }
+    if (aliveInnocents <= 1) {
+      status = GameStatus.VICTORY
+      audio?.vibrateVictory()
+    }
+    return bot.name
+  }
+
+  fun banishParticipantInBotSecretMode(targetUid: String): Boolean = synchronized(stateLock) {
+    if (!isBotSecretMode) return false
+    var wasImpostor = false
+    if (targetUid == "LOCAL_PLAYER") {
+      localPlayerAlive = false
+      lives = 0
+      wasImpostor = botSecretLocalIsImpostor
+    } else {
+      val bot = bots.firstOrNull { it.uid == targetUid }
+      if (bot != null) {
+        bot.isAlive = false
+        bot.bodyReported = true
+        wasImpostor = bot.isSecretImpostor
+      }
+    }
+    return wasImpostor
+  }
+
+  fun resetBotSecretCooldownsAfterMeeting() = synchronized(stateLock) {
+    isPausedByMeeting = false
+    pendingBotMeetingCaller = null
+    botReportCooldownTimer = 6.0f
+    bots.forEach { b ->
+      if (!b.isAlive) {
+        b.bodyReported = true
+      }
+      b.killCooldownTimer = max(b.killCooldownTimer, 8.0f)
+    }
+    if (botSecretLocalIsImpostor) {
+      secretKillCooldownTimer = max(secretKillCooldownTimer, 5.0f)
+    }
+  }
+
   fun resetGame(isEndless: Boolean = false) {
     val fallbackMode = if (isEndless) ALL_40_MODES[1] else ALL_40_MODES[0]
     resetGameForMode(fallbackMode, overrideGhostCount = ghostCount)
@@ -323,28 +379,37 @@ class GameEngine(
     } else {
       defaultObstacles
     }
+    isBotSecretMode = mode.id.startsWith("bots_secret_")
+    val totalCustomBots = if (mode.isBotsMode && mode.botCount > 0) mode.botCount.coerceIn(1, 40) else 0
+    val impostorSlot = if (isBotSecretMode && totalCustomBots > 2) Random.nextInt(totalCustomBots + 1) else -1
+    botSecretLocalIsImpostor = isBotSecretMode && impostorSlot == 0
+    isSecretMode = isBotSecretMode || (isMultiplayerActive && isSecretMode && !mode.isBotsMode)
+    localPlayerAlive = true
+    pendingBotMeetingCaller = null
+    botReportCooldownTimer = 0f
+
     val ghostPlayerMode = isPlayerGhost
     endlessMode = !ghostPlayerMode && mode.isEndless
-    goalCats = if (ghostPlayerMode) {
-      if (isMultiplayerActive) multiplayerCaptureGoal else 3
-    } else if (mode.goalCats > 0) {
-      mode.goalCats
-    } else {
-      999999
+    goalCats = when {
+      isBotSecretMode && botSecretLocalIsImpostor -> max(1, totalCustomBots - 1)
+      isBotSecretMode -> max(10, mode.goalCats)
+      ghostPlayerMode -> if (isMultiplayerActive) multiplayerCaptureGoal else 3
+      mode.goalCats > 0 -> mode.goalCats
+      else -> 999999
     }
     timeLimitRemaining = mode.timeLimitSec
 
-    heroPosition = if (ghostPlayerMode) {
+    heroPosition = if (ghostPlayerMode && !isBotSecretMode) {
       Vector2D(worldWidth * 0.2f, worldHeight * 0.2f)
     } else {
       Vector2D(worldWidth / 2f, worldHeight * 0.65f)
     }
     heroVelocity = Vector2D(0f, 0f)
-    heroAngle = if (ghostPlayerMode) 45f else -90f
-    maxLives = if (ghostPlayerMode) 3 else mode.heroLives
+    heroAngle = if (ghostPlayerMode && !isBotSecretMode) 45f else -90f
+    maxLives = if (ghostPlayerMode || isBotSecretMode) 3 else mode.heroLives
     lives = maxLives
     ghostCaptureCooldownTimer = 0f
-    secretKillCooldownTimer = 0f
+    secretKillCooldownTimer = if (isBotSecretMode && botSecretLocalIsImpostor) 4.0f else 0f
     isPausedByMeeting = false
 
     isInvincible = false
@@ -395,7 +460,7 @@ class GameEngine(
     ghosts.clear()
     aiRunnerCat = null
 
-    if (ghostPlayerMode) {
+    if (ghostPlayerMode && !isBotSecretMode) {
       if (!isMultiplayerActive) {
         aiRunnerCat = AiRunnerCat(
           position = Vector2D(worldWidth * 0.52f, worldHeight * 0.68f),
@@ -405,7 +470,7 @@ class GameEngine(
           goalCats = 10
         )
       }
-    } else {
+    } else if (!isBotSecretMode) {
       val spawnCorners = listOf(
         Vector2D(worldWidth * 0.15f, worldHeight * 0.15f),
         Vector2D(worldWidth * 0.85f, worldHeight * 0.15f),
@@ -425,39 +490,45 @@ class GameEngine(
           )
         )
       }
+    }
 
-      if (mode.isBotsMode && mode.botCount > 0) {
-        val botNames = listOf(
-          "Bot Alfa", "Bot Turbo", "Bot Ninja", "Bot Pixel", "Bot Miau",
-          "Bot Raio", "Bot Estrela", "Bot Cometa", "Bot Sombra", "Bot Lua",
-          "Bot Cristal", "Bot Foguete", "Bot Tigre", "Bot Safira", "Bot Rubi",
-          "Bot Vento", "Bot Flash", "Bot Cyber", "Bot Ouro", "Bot Lenda"
+    if (mode.isBotsMode && totalCustomBots > 0) {
+      val botNames = listOf(
+        "Bot Alfa", "Bot Turbo", "Bot Ninja", "Bot Pixel", "Bot Miau",
+        "Bot Raio", "Bot Estrela", "Bot Cometa", "Bot Sombra", "Bot Lua",
+        "Bot Cristal", "Bot Foguete", "Bot Tigre", "Bot Safira", "Bot Rubi",
+        "Bot Vento", "Bot Flash", "Bot Cyber", "Bot Ouro", "Bot Lenda"
+      )
+      val botColors = listOf(
+        Color(0xFF38BDF8), Color(0xFFFB7185), Color(0xFF34D399), Color(0xFFFBBF24),
+        Color(0xFFA78BFA), Color(0xFF2DD4BF), Color(0xFFF472B6), Color(0xFF60A5FA),
+        Color(0xFFFB923C), Color(0xFFC084FC)
+      )
+      val botEmojis = listOf("🤖", "⚡", "🥷", "👾", "🐱", "🚀", "🌟", "☄️", "🕶️", "🌙")
+      for (i in 0 until totalCustomBots) {
+        val angle = (i.toFloat() / totalCustomBots.toFloat()) * 2f * PI.toFloat()
+        val ringRadius = 420f + (i % 4) * 240f
+        val rawPos = Vector2D(
+          worldWidth * 0.5f + cos(angle) * ringRadius,
+          worldHeight * 0.5f + sin(angle) * ringRadius
         )
-        val botColors = listOf(
-          Color(0xFF38BDF8), Color(0xFFFB7185), Color(0xFF34D399), Color(0xFFFBBF24),
-          Color(0xFFA78BFA), Color(0xFF2DD4BF), Color(0xFFF472B6), Color(0xFF60A5FA),
-          Color(0xFFFB923C), Color(0xFFC084FC)
+        val assignedSkin = ALL_HERO_SKINS[i % ALL_HERO_SKINS.size]
+        bots.add(
+          BotCatState(
+            id = i + 1,
+            name = botNames[i % botNames.size],
+            furColor = if (isBotSecretMode) assignedSkin.furColor else botColors[i % botColors.size],
+            accentEmoji = if (isBotSecretMode) assignedSkin.badgeEmoji else botEmojis[i % botEmojis.size],
+            position = clampAndResolveObstacles(rawPos, 24f),
+            catsCollected = 0,
+            uid = "bot_${i + 1}",
+            skinId = assignedSkin.id,
+            isAlive = true,
+            isSecretImpostor = isBotSecretMode && impostorSlot == (i + 1),
+            killCooldownTimer = if (isBotSecretMode) 9.5f else 0f,
+            bodyReported = false
+          )
         )
-        val botEmojis = listOf("🤖", "⚡", "🥷", "👾", "🐱", "🚀", "🌟", "☄️", "🕶️", "🌙")
-        val totalBots = mode.botCount.coerceIn(1, 40)
-        for (i in 0 until totalBots) {
-          val angle = (i.toFloat() / totalBots.toFloat()) * 2f * PI.toFloat()
-          val ringRadius = 420f + (i % 4) * 240f
-          val rawPos = Vector2D(
-            worldWidth * 0.5f + cos(angle) * ringRadius,
-            worldHeight * 0.5f + sin(angle) * ringRadius
-          )
-          bots.add(
-            BotCatState(
-              id = i + 1,
-              name = botNames[i % botNames.size],
-              furColor = botColors[i % botColors.size],
-              accentEmoji = botEmojis[i % botEmojis.size],
-              position = clampAndResolveObstacles(rawPos, 24f),
-              catsCollected = 0
-            )
-          )
-        }
       }
     }
 
@@ -468,6 +539,7 @@ class GameEngine(
     activePowerUps.clear()
 
     val catsToSpawn = when {
+      isBotSecretMode -> max(14, mode.startingCatsOnMap)
       ghostPlayerMode && isMultiplayerActive -> 0
       ghostPlayerMode -> 4
       mode.isBotsMode -> max(18, mode.startingCatsOnMap)
@@ -659,6 +731,7 @@ class GameEngine(
 
     if (ghostCaptureCooldownTimer > 0f) ghostCaptureCooldownTimer = max(0f, ghostCaptureCooldownTimer - safeDelta)
     if (secretKillCooldownTimer > 0f) secretKillCooldownTimer = max(0f, secretKillCooldownTimer - safeDelta)
+    if (botReportCooldownTimer > 0f) botReportCooldownTimer = max(0f, botReportCooldownTimer - safeDelta)
     if (comboTimer > 0f) {
       comboTimer -= safeDelta
       if (comboTimer <= 0f) currentCombo = 0
@@ -705,8 +778,14 @@ class GameEngine(
 
     if (!localPlayerAlive) {
       // Eliminated / banished player can still roam freely as a spectator without collecting or hitting ghosts
+      if (isBotSecretMode && bots.isNotEmpty() && status == GameStatus.PLAYING) {
+        updateBots(safeDelta)
+      }
     } else if (isPlayerGhost) {
       updateGhostPlayerRole(safeDelta)
+      if (isBotSecretMode && bots.isNotEmpty() && status == GameStatus.PLAYING) {
+        updateBots(safeDelta)
+      }
       val pickedPowerUps = mutableListOf<PowerUpItem>()
       val powerUpIter = activePowerUps.iterator()
       while (powerUpIter.hasNext()) {
@@ -915,8 +994,31 @@ class GameEngine(
     }
 
     for (bot in bots) {
+      if (!bot.isAlive) continue
       if (bot.invincibleTimer > 0f) {
         bot.invincibleTimer = max(0f, bot.invincibleTimer - deltaTime)
+      }
+      if (bot.killCooldownTimer > 0f) {
+        bot.killCooldownTimer = max(0f, bot.killCooldownTimer - deltaTime)
+      }
+
+      // In Bot Secret Mode, innocent bots discovering a freshly eliminated body trigger an emergency meeting
+      if (isBotSecretMode && !bot.isSecretImpostor && botReportCooldownTimer <= 0f && pendingBotMeetingCaller == null) {
+        val freshBody = bots.firstOrNull { !it.isAlive && !it.bodyReported && (it.position - bot.position).length() < 130f }
+        if (freshBody != null) {
+          freshBody.bodyReported = true
+          pendingBotMeetingCaller = bot.name
+          botReportCooldownTimer = 14.0f
+          isPausedByMeeting = true
+          addFloatingTextSafe(
+            FloatingText(
+              text = "🚨 ${bot.name} encontrou ${freshBody.name} e chamou reunião!",
+              position = heroPosition + Vector2D(0f, -55f),
+              color = Color(0xFFEA580C)
+            )
+          )
+          break
+        }
       }
 
       val nearestCat = activeCollectibles
@@ -926,7 +1028,29 @@ class GameEngine(
       val nearestGhost = ghosts.minByOrNull { (it.position - bot.position).length() }
       val ghostDist = nearestGhost?.let { (it.position - bot.position).length() } ?: 9999f
 
+      // Impostor Bot stalking logic in Bot Secret Mode
+      var huntTargetPos: Vector2D? = null
+      var huntTargetBot: BotCatState? = null
+      var huntTargetIsHero = false
+      if (isBotSecretMode && bot.isSecretImpostor && gameTimeSeconds >= 10f && bot.killCooldownTimer <= 0f) {
+        val victimBot = bots
+          .filter { it.isAlive && !it.isSecretImpostor && it.id != bot.id }
+          .minByOrNull { (it.position - bot.position).length() }
+        val botVictimDist = victimBot?.let { (it.position - bot.position).length() } ?: 99999f
+        val heroEligible = !botSecretLocalIsImpostor && localPlayerAlive && !isEffectivelyGodMode && !isEffectivelyInvisible
+        val heroDist = if (heroEligible) (heroPosition - bot.position).length() else 99999f
+
+        if (heroEligible && heroDist <= botVictimDist && heroDist < 720f) {
+          huntTargetPos = heroPosition
+          huntTargetIsHero = true
+        } else if (victimBot != null && botVictimDist < 760f) {
+          huntTargetPos = victimBot.position
+          huntTargetBot = victimBot
+        }
+      }
+
       val moveDir = when {
+        huntTargetPos != null -> (huntTargetPos - bot.position).normalized()
         ghostDist < 190f && nearestGhost != null && !nearestGhost.isFleeing && nearestGhost.freezeTimerSec <= 0f -> {
           val flee = (bot.position - nearestGhost.position).normalized()
           val toCat = nearestCat?.let { (it.position - bot.position).normalized() } ?: Vector2D(0f, 0f)
@@ -939,7 +1063,7 @@ class GameEngine(
         }
       }
 
-      val botBaseSpeed = (210f + (bot.id % 6) * 14f) * speedDiffFactor
+      val botBaseSpeed = ((210f + (bot.id % 6) * 14f) * speedDiffFactor) * (if (huntTargetPos != null) 1.18f else 1.0f)
       val targetVel = moveDir * botBaseSpeed
       bot.velocity = bot.velocity + (targetVel - bot.velocity) * (6f * deltaTime).coerceAtMost(1f)
       bot.position = clampAndResolveObstacles(bot.position + bot.velocity * deltaTime, 22f)
@@ -947,10 +1071,56 @@ class GameEngine(
         bot.angle = atan2(bot.velocity.y, bot.velocity.x) * 180f / PI.toFloat()
       }
 
+      // Execute kill if Impostor Bot caught victim
+      if (isBotSecretMode && bot.isSecretImpostor && gameTimeSeconds >= 10f && bot.killCooldownTimer <= 0f && status == GameStatus.PLAYING) {
+        if (huntTargetIsHero && (heroPosition - bot.position).length() < 64f) {
+          bot.killCooldownTimer = 12.0f
+          localPlayerAlive = false
+          lives = 0
+          winnerBotName = bot.name
+          status = GameStatus.GAME_OVER
+          audio?.playGhostHitSound()
+          audio?.vibrateGhostHit()
+          addFloatingTextSafe(
+            FloatingText(
+              text = "🗡️ ${bot.name} era o Impostor e eliminou você!",
+              position = heroPosition + Vector2D(0f, -55f),
+              color = Color(0xFFEF4444)
+            )
+          )
+          break
+        } else if (huntTargetBot != null && (huntTargetBot.position - bot.position).length() < 68f) {
+          bot.killCooldownTimer = 11.5f
+          huntTargetBot.isAlive = false
+          huntTargetBot.bodyReported = false
+          for (i in 0 until 16) {
+            val angle = Random.nextFloat() * 2f * PI.toFloat()
+            val spd = Random.nextFloat() * 180f + 40f
+            addParticleSafe(
+              Particle(
+                position = huntTargetBot.position,
+                velocity = Vector2D(cos(angle) * spd, sin(angle) * spd),
+                color = Color(0xFFEF4444),
+                size = 6.5f,
+                life = 0.65f
+              )
+            )
+          }
+          val aliveInnocents = bots.count { it.isAlive && !it.isSecretImpostor } +
+            if (!botSecretLocalIsImpostor && localPlayerAlive) 1 else 0
+          if (aliveInnocents <= 1) {
+            winnerBotName = bot.name
+            status = GameStatus.GAME_OVER
+            audio?.playGhostHitSound()
+            break
+          }
+        }
+      }
+
       if (nearestCat != null && (nearestCat.position - bot.position).length() < 48f) {
         botPickedCats.add(nearestCat)
         bot.catsCollected++
-        if (bot.catsCollected >= goalCats && status == GameStatus.PLAYING) {
+        if (!isBotSecretMode && bot.catsCollected >= goalCats && status == GameStatus.PLAYING) {
           winnerBotName = bot.name
           status = GameStatus.GAME_OVER
           addFloatingTextSafe(
@@ -961,6 +1131,16 @@ class GameEngine(
             )
           )
           audio?.playGhostHitSound()
+          break
+        } else if (isBotSecretMode && !bot.isSecretImpostor && bot.catsCollected >= currentMode.goalCats && status == GameStatus.PLAYING) {
+          if (botSecretLocalIsImpostor) {
+            winnerBotName = bot.name
+            status = GameStatus.GAME_OVER
+            audio?.playGhostHitSound()
+          } else {
+            status = GameStatus.VICTORY
+            audio?.vibrateVictory()
+          }
           break
         }
       }
@@ -977,7 +1157,7 @@ class GameEngine(
     if (botPickedCats.isNotEmpty()) {
       activeCollectibles.removeAll(botPickedCats)
       if (status == GameStatus.PLAYING) {
-        val targetCount = max(16, currentMode.startingCatsOnMap)
+        val targetCount = if (isBotSecretMode) max(14, currentMode.startingCatsOnMap) else max(16, currentMode.startingCatsOnMap)
         while (activeCollectibles.size < targetCount) {
           spawnNextCat()
         }
@@ -986,6 +1166,13 @@ class GameEngine(
   }
 
   private fun updateGhostPlayerRole(deltaTime: Float) {
+    if (isBotSecretMode) {
+      // Disguised bot-mode impostor hunts via the Matar button while collectibles stay stocked
+      while (activeCollectibles.size < max(14, currentMode.startingCatsOnMap)) {
+        spawnNextCat()
+      }
+      return
+    }
     if (isMultiplayerActive) {
       if (isSecretMode) {
         // In Secret Mode the impostor is disguised and attacks deliberately via the Matar button

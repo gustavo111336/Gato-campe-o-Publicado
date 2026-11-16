@@ -411,4 +411,60 @@ class ExampleUnitTest {
     engine.activeCollectibles.clear()
     assertTrue("Snapshot must remain intact if engine list changes", catsSnap.isNotEmpty())
   }
+
+  @Test
+  fun `solo multiplayer custom bot count mode supports 2 bots without secret mode and 4 bots with secret mode`() {
+    val engine = GameEngine()
+
+    val twoBotsMode = BOTS_ARENA_MODE.copy(
+      id = "bots_multi_2",
+      botCount = 2,
+      goalCats = 20,
+      ghostCount = 2
+    )
+    engine.resetGameForMode(twoBotsMode)
+    assertEquals(2, engine.bots.size)
+    assertFalse("2 bots or fewer must not enter Bot Secret Mode", engine.isBotSecretMode)
+    assertFalse(engine.isPlayerGhost)
+
+    val fourBotsSecretMode = BOTS_ARENA_MODE.copy(
+      id = "bots_secret_4",
+      botCount = 4,
+      goalCats = 15,
+      ghostCount = 0
+    )
+    engine.resetGameForMode(fourBotsSecretMode)
+    assertTrue("Secret bots mode must activate for >2 bots", engine.isBotSecretMode)
+    assertEquals(4, engine.bots.size)
+    assertTrue("No purple NPC ghosts in Secret mode", engine.ghosts.isEmpty())
+
+    val botImpostors = engine.bots.count { it.isSecretImpostor }
+    val totalImpostors = botImpostors + (if (engine.botSecretLocalIsImpostor) 1 else 0)
+    assertEquals("Exactly 1 impostor must exist between local player and bots", 1, totalImpostors)
+  }
+
+  @Test
+  fun `bot secret mode kill and banish update alive states and victory conditions`() {
+    val engine = GameEngine()
+    val secretMode = BOTS_ARENA_MODE.copy(
+      id = "bots_secret_3",
+      botCount = 3,
+      goalCats = 15,
+      ghostCount = 0
+    )
+    engine.resetGameForMode(secretMode)
+    engine.startPlaying()
+
+    // Force deterministic impostor bot on bot_1 for banishment verification
+    engine.botSecretLocalIsImpostor = false
+    engine.bots.forEachIndexed { idx, bot ->
+      bot.isSecretImpostor = (idx == 0)
+      bot.isAlive = true
+    }
+
+    assertFalse(engine.banishParticipantInBotSecretMode("bot_2"))
+    assertFalse(engine.bots[1].isAlive)
+    assertTrue(engine.banishParticipantInBotSecretMode("bot_1"))
+    assertFalse(engine.bots[0].isAlive)
+  }
 }

@@ -86,7 +86,11 @@ fun VictoryDialog(
         Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-          text = if (uiState.isPlayerGhost) "👻 FANTASMA CAMPEÃO!" else "VOCÊ É O CAMPEÃO!",
+          text = when {
+            uiState.isBotSecretMode && uiState.isPlayerGhost -> "🎭 IMPOSTOR CAMPEÃO!"
+            uiState.isPlayerGhost -> "👻 FANTASMA CAMPEÃO!"
+            else -> "VOCÊ É O CAMPEÃO!"
+          },
           fontSize = 23.sp,
           fontWeight = FontWeight.Black,
           color = Color(0xFFFDE047),
@@ -103,10 +107,15 @@ fun VictoryDialog(
         )
 
         Text(
-          text = if (uiState.isPlayerGhost) {
-            "Você capturou o alvo ${uiState.catsCollected} vezes antes que os gatos escapassem!"
-          } else {
-            "Parabéns! Você resgatou todos os ${uiState.goalCats} gatos e escapou com bravura!"
+          text = when {
+            uiState.isBotSecretMode && uiState.isPlayerGhost ->
+              "Você enganou e eliminou os bots inocentes sem ser descoberto!"
+            uiState.isBotSecretMode ->
+              "Parabéns! O Fantasma Impostor não conseguiu impedir vocês na arena com bots!"
+            uiState.isPlayerGhost ->
+              "Você capturou o alvo ${uiState.catsCollected} vezes antes que os gatos escapassem!"
+            else ->
+              "Parabéns! Você resgatou todos os ${uiState.goalCats} gatos e escapou com bravura!"
           },
           fontSize = 13.sp,
           color = Color(0xFFE2E8F0),
@@ -364,7 +373,8 @@ fun GameOverDialog(
 
         Text(
           text = when {
-            botWon -> "UM BOT ALCANÇOU 50 GATOS!"
+            botWon && uiState.isBotSecretMode -> "🗡️ O IMPOSTOR VENCEU!"
+            botWon -> "UM BOT ALCANÇOU ${uiState.goalCats} GATOS!"
             timedOut -> "O TEMPO ACABOU!"
             uiState.isPlayerGhost -> "O GATO CORREDOR ESCAPOU!"
             else -> "O FANTASMA TE PEGOU!"
@@ -376,7 +386,10 @@ fun GameOverDialog(
         )
 
         val summaryText = when {
-          botWon -> "🏆 ${uiState.winnerBotName} venceu a corrida dos 20 bots (50/50)! Você resgatou ${uiState.catsCollected}/50 gatos."
+          botWon && uiState.isBotSecretMode ->
+            "🎭 ${uiState.winnerBotName} venceu a partida secreta com ${uiState.botCount} bots!"
+          botWon ->
+            "🏆 ${uiState.winnerBotName} venceu a corrida dos ${uiState.botCount} bot(s) (${uiState.goalCats}/${uiState.goalCats})! Você resgatou ${uiState.catsCollected}/${uiState.goalCats} gatos."
           uiState.isPlayerGhost -> "Você acertou ${uiState.catsCollected}/${uiState.goalCats} capturas antes do corredor resgatar 10 gatos!"
           uiState.isEndlessMode -> "${uiState.currentMode.emoji} ${uiState.currentMode.name}: você resgatou ${uiState.catsCollected} gatinhos! (Recorde: ${uiState.bestEndlessCats} ♾️)"
           else -> "${uiState.currentMode.emoji} ${uiState.currentMode.name}: ${uiState.catsCollected} de ${uiState.goalCats} felinos nesta rodada."

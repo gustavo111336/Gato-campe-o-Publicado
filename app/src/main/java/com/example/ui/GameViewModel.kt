@@ -144,6 +144,10 @@ data class GameUiState(
   val multiplayerMaxPlayers: Int = 100,
   val multiplayerRole: String = "cat",
   val isSecretMode: Boolean = false,
+  val isBotSecretMode: Boolean = false,
+  val aliveBotsCount: Int = 0,
+  val botSecretMeetingRoom: com.example.data.MultiplayerRoom? = null,
+  val botSecretMeetingPlayers: List<RoomPlayer> = emptyList(),
   val isLocalPlayerAlive: Boolean = true,
   val eliminatedUserIds: Set<String> = emptySet(),
   val secretKillCooldownRatio: Float = 0f,
@@ -227,6 +231,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
   private var recordSampleTimer = 0f
   private var recordingElapsedSec = 0f
   private var recordSampleIntervalSec = 0.10f
+  private var botSecretLocalUsername: String = "Você"
+  private var botSecretRoomCode: String = ""
+  private var botMeetingRound: Long = 0L
 
   init {
     loadSavedPreferences()
@@ -1084,11 +1091,59 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     startMode(BOTS_ARENA_MODE)
   }
 
+  fun startMultiplayerBotsGame(
+    botCount: Int,
+    secretMode: Boolean,
+    localUsername: String,
+    roomCode: String
+  ) {
+    val safeBots = botCount.coerceIn(1, 20)
+    val effectiveSecret = secretMode && safeBots > 2
+    botSecretLocalUsername = localUsername.ifBlank { "Você" }
+    botSecretRoomCode = roomCode
+    botMeetingRound = 0
+
+    val botMode = BOTS_ARENA_MODE.copy(
+      id = if (effectiveSecret) "bots_secret_$safeBots" else "bots_multi_$safeBots",
+      name = if (effectiveSecret) "Secreto c/ $safeBots Bots" else "Arena c/ $safeBots Bots",
+      emoji = if (effectiveSecret) "🕵️" else "🤖",
+      goalCats = if (effectiveSecret) 15 else 20,
+      ghostCount = if (effectiveSecret) 0 else 2,
+      botCount = safeBots,
+      startingCatsOnMap = if (effectiveSecret) 14 else 18,
+      isBotsMode = true
+    )
+    startMode(botMode)
+
+    _uiState.value = _uiState.value.copy(
+      activeRoomCode = roomCode.takeIf { it.isNotBlank() } ?: _uiState.value.activeRoomCode,
+      isBotSecretMode = engine.isBotSecretMode,
+      isSecretMode = engine.isBotSecretMode,
+      isPlayerGhost = engine.isPlayerGhost,
+      multiplayerRole = if (engine.isPlayerGhost) "ghost" else "cat",
+      isLocalPlayerAlive = true,
+      aliveBotsCount = engine.bots.count { it.isAlive },
+      botSecretMeetingRoom = null,
+      botSecretMeetingPlayers = emptyList()
+    )
+
+    val introMsg = when {
+      effectiveSecret && engine.isPlayerGhost ->
+        "🎭 Modo Secreto ($safeBots bots): VOCÊ é o Fantasma disfarçado! Use 🗡️ Matar!"
+      effectiveSecret ->
+        "🕵️ Modo Secreto ($safeBots bots): 1 Bot é o Fantasma disfarçado! Observe e aperte 🚨 Denunciar!"
+      else ->
+        "🤖 Partida iniciada com $safeBots bot(s)! Meta: 20 gatos!"
+    }
+    showTransientFeedback(introMsg)
+  }
+
   fun startMode(mode: GameModeDef) {
     val st = _uiState.value
     if (!mode.isBotsMode && !isModeEffectivelyUnlocked(mode, st)) return
 
     resetRunSyncCounters()
+    botMeetingRound = 0L
     engine.resetGameForMode(mode, overrideGhostCount = st.ghostCount)
     engine.startPlaying()
     val next = st.copy(
@@ -1096,6 +1151,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       currentMode = mode,
       isEndlessMode = mode.isEndless,
       isBotsMode = mode.isBotsMode,
+      isBotSecretMode = engine.isBotSecretMode,
+      isSecretMode = engine.isSecretMode,
+      isPlayerGhost = engine.isPlayerGhost,
+      multiplayerRole = if (engine.isPlayerGhost) "ghost" else "cat",
+      isLocalPlayerAlive = true,
+      aliveBotsCount = engine.bots.count { it.isAlive },
+      botSecretMeetingRoom = null,
+      botSecretMeetingPlayers = emptyList(),
       botCount = if (mode.isBotsMode) engine.bots.size else 0,
       playerBotRank = 1,
       leadingBotName = engine.bots.firstOrNull()?.name.orEmpty(),
@@ -1124,6 +1187,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
   fun restartCurrentMode() {
     if (engine.activeCustomMap != null || _uiState.value.currentMode.id == "custom_map") {
       playCustomMap()
+    } else if (engine.currentMode.id.startsWith("bots_secret_") || engine.currentMode.id.startsWith("bots_multi_")) {
+      startMultiplayerBotsGame(
+        botCount = engine.currentMode.botCount.coerceAtLeast(1),
+        secretMode = engine.currentMode.id.startsWith("bots_secret_"),
+        localUsername = botSecretLocalUsername,
+        roomCode = botSecretRoomCode
+      )
     } else {
       startMode(_uiState.value.currentMode)
     }
@@ -1138,8 +1208,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
   fun returnToMenu() {
     engine.status = GameStatus.READY
+    engine.isPausedByMeeting = false
     val next = _uiState.value.copy(
       gameStatus = GameStatus.READY,
+      botSecretMeetingRoom = null,
+      botSecretMeetingPlayers = emptyList(),
       showVictoryDialog = false,
       showGameOverDialog = false
     )
@@ -1386,6 +1459,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     eliminatedIds: Set<String> = emptySet(),
     isMeetingPaused: Boolean = false
   ) {
+    val soloBotsRunning = engine.currentMode.isBotsMode &&
+      roomCode != null &&
+      maxOf(players.size, 1) <= 1 &&
+      (engine.status == GameStatus.PLAYING || engine.status == GameStatus.PAUSED || engine.isBotSecretMode)
+
+    if (soloBotsRunning) {
+      _uiState.value = _uiState.value.copy(
+        activeRoomCode = roomCode,
+        multiplayerPlayerCount = maxOf(players.size, 1),
+        multiplayerMaxPlayers = maxPlayers,
+        roomWinnerUsername = winnerUsername
+      )
+      if (!leftPlayerMessage.isNullOrBlank()) {
+        showTransientFeedback(leftPlayerMessage)
+      }
+      return
+    }
+
     val others = players.filter { it.userId != myUserId }.map { p ->
       RemotePartnerState(
         userId = p.userId,
@@ -1419,7 +1510,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       isLocalPlayerAlive = localAlive,
       eliminatedUserIds = eliminatedIds,
       roomWinnerUsername = winnerUsername,
-      isPlayerGhost = engine.isPlayerGhost
+      isPlayerGhost = engine.isPlayerGhost,
+      botSecretMeetingRoom = if (roomCode == null) null else _uiState.value.botSecretMeetingRoom,
+      botSecretMeetingPlayers = if (roomCode == null) emptyList() else _uiState.value.botSecretMeetingPlayers
     )
     if (!leftPlayerMessage.isNullOrBlank()) {
       showTransientFeedback(leftPlayerMessage)
@@ -1429,6 +1522,196 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
   fun onSecretKillExecuted(victimName: String, victimUid: String) {
     val pos = engine.snapshotRemotePlayers().find { it.userId == victimUid }?.position ?: engine.heroPosition
     engine.triggerSecretKillFeedback(victimName, pos)
+  }
+
+  fun onBotSecretKill() {
+    val targetUid = _uiState.value.nearestKillTargetUid ?: return
+    val killedName = engine.killBotInSecretMode(targetUid)
+    if (killedName != null) {
+      audio.vibrateCollect()
+    }
+  }
+
+  fun callBotSecretMeeting(callerName: String = botSecretLocalUsername) {
+    if (!engine.isBotSecretMode || _uiState.value.botSecretMeetingRoom != null) return
+    val botsSnapshot = engine.snapshotBots()
+    if (botsSnapshot.isEmpty()) return
+
+    engine.isPausedByMeeting = true
+    engine.pendingBotMeetingCaller = null
+    inputVector = Vector2D(0f, 0f)
+    botMeetingRound++
+
+    val eliminatedIds = mutableSetOf<String>()
+    if (!engine.localPlayerAlive) eliminatedIds.add("LOCAL_PLAYER")
+    botsSnapshot.filter { !it.isAlive }.forEach { eliminatedIds.add(it.uid) }
+
+    val impostorBot = botsSnapshot.firstOrNull { it.isSecretImpostor }
+    val impostorUid = if (engine.botSecretLocalIsImpostor) "LOCAL_PLAYER" else (impostorBot?.uid ?: botsSnapshot.first().uid)
+
+    val allParticipants = mutableListOf<RoomPlayer>()
+    allParticipants.add(
+      RoomPlayer(
+        userId = "LOCAL_PLAYER",
+        username = botSecretLocalUsername.ifBlank { "Você" },
+        skinId = _uiState.value.selectedSkinId,
+        score = engine.catsCollected.toLong(),
+        banishVoteForUid = "",
+        banishVoteRound = 0
+      )
+    )
+    for (bot in botsSnapshot) {
+      allParticipants.add(
+        RoomPlayer(
+          userId = bot.uid,
+          username = bot.name,
+          skinId = bot.skinId,
+          score = bot.catsCollected.toLong(),
+          banishVoteForUid = "",
+          banishVoteRound = 0
+        )
+      )
+    }
+
+    val aliveCandidateIds = allParticipants.filter { !eliminatedIds.contains(it.userId) }.map { it.userId }
+    val votedParticipants = allParticipants.map { player ->
+      if (player.userId == "LOCAL_PLAYER" || eliminatedIds.contains(player.userId)) {
+        player
+      } else {
+        val otherTargets = aliveCandidateIds.filter { it != player.userId }
+        val botVote = if (otherTargets.isEmpty() || kotlin.random.Random.nextFloat() < 0.25f) {
+          "SKIP"
+        } else {
+          otherTargets[kotlin.random.Random.nextInt(otherTargets.size)]
+        }
+        player.copy(
+          banishVoteForUid = botVote,
+          banishVoteRound = botMeetingRound
+        )
+      }
+    }
+
+    val room = com.example.data.MultiplayerRoom(
+      code = botSecretRoomCode.ifBlank { "BOTS" },
+      status = "playing",
+      isSecretMode = true,
+      ghostPlayerUserId = impostorUid,
+      eliminatedUserIdsCsv = eliminatedIds.joinToString(","),
+      meetingStatus = "active",
+      meetingCallerUid = callerName,
+      meetingCallerUsername = callerName,
+      meetingRound = botMeetingRound
+    )
+
+    audio.playGhostAlertSound()
+    _uiState.value = _uiState.value.copy(
+      botSecretMeetingRoom = room,
+      botSecretMeetingPlayers = votedParticipants
+    )
+  }
+
+  fun castBotBanishVote(targetUidOrSkip: String) {
+    val room = _uiState.value.botSecretMeetingRoom ?: return
+    if (room.meetingStatus != "active") return
+    val updatedPlayers = _uiState.value.botSecretMeetingPlayers.map { p ->
+      if (p.userId == "LOCAL_PLAYER") {
+        p.copy(banishVoteForUid = targetUidOrSkip, banishVoteRound = room.meetingRound)
+      } else {
+        p
+      }
+    }
+    _uiState.value = _uiState.value.copy(botSecretMeetingPlayers = updatedPlayers)
+  }
+
+  fun resolveBotSecretMeeting() {
+    val room = _uiState.value.botSecretMeetingRoom ?: return
+    val players = _uiState.value.botSecretMeetingPlayers
+    val eliminatedSet = room.eliminatedUserIdsCsv
+      .split(",")
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+      .toMutableSet()
+
+    val counts = players
+      .filter { !eliminatedSet.contains(it.userId) && it.banishVoteRound == room.meetingRound && it.banishVoteForUid.isNotBlank() }
+      .groupingBy { it.banishVoteForUid }
+      .eachCount()
+
+    val candidateCounts = counts.filterKeys { it != "SKIP" }
+    val skipVotes = counts["SKIP"] ?: 0
+    val topCount = candidateCounts.values.maxOrNull() ?: 0
+    val topTargets = candidateCounts.filterValues { it == topCount }.keys
+
+    var banishedUid = ""
+    var banishedName = ""
+    var wasImpostor = false
+    var resultText = "⚖️ Empate ou maioria pulou! Ninguém foi banido."
+    var finished = false
+    var winnerName = ""
+
+    if (topCount > 0 && topCount >= skipVotes && topTargets.size == 1) {
+      val targetUid = topTargets.first()
+      val targetPlayer = players.find { it.userId == targetUid }
+      banishedUid = targetUid
+      banishedName = targetPlayer?.username ?: "Jogador"
+      wasImpostor = engine.banishParticipantInBotSecretMode(targetUid)
+      eliminatedSet.add(targetUid)
+
+      if (wasImpostor) {
+        resultText = "**$banishedName** realmente era um impostor"
+        finished = true
+        winnerName = "Gatos Inocentes!"
+      } else {
+        resultText = "**$banishedName** não era um impostor"
+        val aliveAfter = players.filter { !eliminatedSet.contains(it.userId) }
+        val impostorStillAlive = aliveAfter.any { it.userId == room.ghostPlayerUserId }
+        val innocentCount = aliveAfter.count { it.userId != room.ghostPlayerUserId }
+        val localBanished = banishedUid == "LOCAL_PLAYER"
+        if (localBanished || (impostorStillAlive && innocentCount <= 1)) {
+          finished = true
+          val impName = players.find { it.userId == room.ghostPlayerUserId }?.username ?: "Fantasma"
+          winnerName = "Fantasma Impostor ($impName)"
+        }
+      }
+    }
+
+    val updatedRoom = room.copy(
+      status = if (finished) "finished" else "playing",
+      winnerUsername = winnerName,
+      eliminatedUserIdsCsv = eliminatedSet.joinToString(","),
+      meetingStatus = "result",
+      lastBanishedUserId = banishedUid,
+      lastBanishedUsername = banishedName,
+      lastBanishedWasImpostor = wasImpostor,
+      meetingResultText = resultText
+    )
+
+    _uiState.value = _uiState.value.copy(
+      botSecretMeetingRoom = updatedRoom,
+      isLocalPlayerAlive = engine.localPlayerAlive,
+      eliminatedUserIds = eliminatedSet,
+      aliveBotsCount = engine.bots.count { it.isAlive }
+    )
+  }
+
+  fun dismissBotMeetingResult() {
+    engine.resetBotSecretCooldownsAfterMeeting()
+    _uiState.value = _uiState.value.copy(
+      botSecretMeetingRoom = null,
+      botSecretMeetingPlayers = emptyList(),
+      isLocalPlayerAlive = engine.localPlayerAlive,
+      aliveBotsCount = engine.bots.count { it.isAlive }
+    )
+  }
+
+  fun leaveBotSecretToLobby() {
+    val wasInnocentWin = _uiState.value.botSecretMeetingRoom?.lastBanishedWasImpostor == true &&
+      !engine.botSecretLocalIsImpostor
+    if (wasInnocentWin) {
+      engine.status = GameStatus.VICTORY
+    }
+    returnToMenu()
+    openOnlineDialog(true, OnlineLobbyTab.ROOMS)
   }
 
   fun exportCloudSavePayload(): CloudSavePayload {
@@ -1625,6 +1908,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           engine.update(deltaSeconds, inputVector)
           syncIncrementalGameplayStats()
 
+          val pendingCaller = engine.pendingBotMeetingCaller
+          if (pendingCaller != null && _uiState.value.botSecretMeetingRoom == null) {
+            engine.pendingBotMeetingCaller = null
+            callBotSecretMeeting(pendingCaller)
+          }
+
           if (_uiState.value.isRecordingGameplay) {
             recordingElapsedSec += deltaSeconds
             recordSampleTimer += deltaSeconds
@@ -1644,17 +1933,25 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val remoteAlive = engine.snapshotRemotePlayers().filter {
           !engine.eliminatedUserIds.contains(it.userId)
         }
+        val aliveBots = engine.snapshotBots().filter { it.isAlive }
         val minGhostDist = if (engine.isPlayerGhost) {
           engine.snapshotAiRunnerCat()?.let { (it.position - engine.heroPosition).length() }
+            ?: aliveBots.filter { !it.isSecretImpostor }.minOfOrNull { (it.position - engine.heroPosition).length() }
             ?: remoteAlive.minOfOrNull { (it.position - engine.heroPosition).length() }
             ?: 9999f
         } else {
           engine.snapshotGhosts().minOfOrNull { (it.position - engine.heroPosition).length() } ?: 9999f
         }
-        val nearestKillTarget = if (engine.isSecretMode && engine.isPlayerGhost && engine.localPlayerAlive) {
+        val nearestKillTarget: Pair<String, String>? = if (engine.isBotSecretMode && engine.isPlayerGhost && engine.localPlayerAlive) {
+          aliveBots
+            .filter { !it.isSecretImpostor && (it.position - engine.heroPosition).length() <= 240f }
+            .minByOrNull { (it.position - engine.heroPosition).length() }
+            ?.let { it.uid to it.name }
+        } else if (engine.isSecretMode && engine.isPlayerGhost && engine.localPlayerAlive) {
           remoteAlive
             .filter { (it.position - engine.heroPosition).length() <= 240f }
             .minByOrNull { (it.position - engine.heroPosition).length() }
+            ?.let { it.userId to it.username }
         } else {
           null
         }
@@ -1666,6 +1963,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           gameStatus = engine.status,
           isEndlessMode = engine.endlessMode,
           isBotsMode = engine.currentMode.isBotsMode,
+          isBotSecretMode = engine.isBotSecretMode,
+          aliveBotsCount = aliveBots.size,
           botCount = engine.bots.size,
           playerBotRank = botRank,
           leadingBotName = leaderBotName,
@@ -1677,8 +1976,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           eliminatedUserIds = engine.eliminatedUserIds,
           secretKillCooldownRatio = (engine.secretKillCooldownTimer / engine.secretKillCooldown).coerceIn(0f, 1f),
           secretKillCooldownSec = engine.secretKillCooldownTimer.coerceAtLeast(0f),
-          nearestKillTargetUid = nearestKillTarget?.userId?.takeIf { it.isNotBlank() },
-          nearestKillTargetName = nearestKillTarget?.username?.takeIf { it.isNotBlank() },
+          nearestKillTargetUid = nearestKillTarget?.first?.takeIf { it.isNotBlank() },
+          nearestKillTargetName = nearestKillTarget?.second?.takeIf { it.isNotBlank() },
           aiRunnerLives = engine.aiRunnerCat?.lives ?: 0,
           aiRunnerCats = engine.aiRunnerCat?.catsCollected ?: 0,
           catsCollected = engine.catsCollected,

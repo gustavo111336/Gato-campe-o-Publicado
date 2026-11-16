@@ -134,12 +134,12 @@ fun ControlsOverlay(
           horizontalAlignment = Alignment.End,
           verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          if (uiState.activeRoomCode != null && uiState.isLocalPlayerAlive) {
+          if ((uiState.activeRoomCode != null || uiState.isBotSecretMode) && uiState.isLocalPlayerAlive) {
             Row(
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              if (uiState.isSecretMode && uiState.multiplayerRole == "ghost") {
+              if (uiState.isSecretMode && (uiState.multiplayerRole == "ghost" || uiState.isPlayerGhost)) {
                 val killReady = uiState.secretKillCooldownRatio <= 0.01f && uiState.nearestKillTargetUid != null
                 val killLabel = when {
                   uiState.secretKillCooldownRatio > 0.01f -> String.format("⏳ %.1fs", uiState.secretKillCooldownSec)
@@ -522,7 +522,7 @@ fun TopHudBar(
           val ghostText = when {
             !uiState.isLocalPlayerAlive -> "💀 Eliminado — assistindo como espectador"
             uiState.isSecretMode && uiState.isPlayerGhost -> "🎭 Secreto: Você é o Fantasma disfarçado! Use 🗡️ Matar"
-            uiState.isSecretMode && uiState.activeRoomCode != null -> "🕵️ Modo Secreto: Descubra o Fantasma e 🚨 Denuncie!"
+            uiState.isSecretMode && (uiState.activeRoomCode != null || uiState.isBotSecretMode) -> "🕵️ Modo Secreto: Descubra o Fantasma e 🚨 Denuncie!"
             uiState.isPlayerGhost && uiState.activeRoomCode != null -> "👻 Caçando players! Acertos: ${uiState.catsCollected}/${uiState.goalCats}"
             uiState.isPlayerGhost -> "🏃 Corredor: ${uiState.aiRunnerLives}❤️ • ${uiState.aiRunnerCats}/10 gatos"
             uiState.invisibilityActive -> "🫥 Invisível! Fantasmas perdidos"
@@ -596,9 +596,18 @@ fun TopHudBar(
             fontWeight = FontWeight.Bold,
             maxLines = 1
           )
-          if (uiState.isBotsMode) {
+          if (uiState.isBotSecretMode) {
+            val aliveAll = uiState.aliveBotsCount + if (uiState.isLocalPlayerAlive) 1 else 0
             Text(
-              text = "🤖 #${uiState.playerBotRank}/${uiState.botCount + 1} • Líder: ${uiState.leadingBotName} ${uiState.leadingBotCats}/50",
+              text = "🕵️ Vivos: $aliveAll/${uiState.botCount + 1} • 🤖 Bots",
+              color = Color(0xFFFCA5A5),
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Black,
+              maxLines = 1
+            )
+          } else if (uiState.isBotsMode) {
+            Text(
+              text = "🤖 #${uiState.playerBotRank}/${uiState.botCount + 1} • Líder: ${uiState.leadingBotName} ${uiState.leadingBotCats}/${uiState.goalCats}",
               color = Color(0xFF67E8F9),
               fontSize = 10.sp,
               fontWeight = FontWeight.Black,

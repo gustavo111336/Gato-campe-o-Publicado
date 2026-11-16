@@ -283,5 +283,11 @@ data class BotCatState(
   var velocity: Vector2D = Vector2D(0f, 0f),
   var angle: Float = 0f,
   var catsCollected: Int = 0,
-  var invincibleTimer: Float = 0f
+  var invincibleTimer: Float = 0f,
+  val uid: String = "bot_$id",
+  val skinId: String = "classic_orange",
+  var isAlive: Boolean = true,
+  var isSecretImpostor: Boolean = false,
+  var killCooldownTimer: Float = 0f,
+  var bodyReported: Boolean = false
 )
