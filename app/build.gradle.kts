@@ -149,3 +149,16 @@ tasks.withType<Test> {
     events("passed", "failed", "skipped")
   }
 }
+
+tasks.register("copyDebugApkToFolder") {
+  dependsOn("assembleDebug")
+  doLast {
+    val outputDir = file("${projectDir}/apk")
+    outputDir.mkdirs()
+    val apkFile = file("${buildDir}/outputs/apk/debug/app-debug.apk")
+    if (apkFile.exists()) {
+      apkFile.copyTo(file("${outputDir}/app-debug.apk"), overwrite = true)
+      apkFile.copyTo(file("${outputDir}/GatoCampeao.apk"), overwrite = true)
+    }
+  }
+}

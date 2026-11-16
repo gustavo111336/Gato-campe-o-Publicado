@@ -47,6 +47,7 @@ fun SettingsDialog(
   onCheckUpdateNow: () -> Unit,
   onOpenUpdateStore: () -> Unit,
   onSendMeowNotification: () -> Unit,
+  onOpenAdminDialog: () -> Unit = {},
   onDismiss: () -> Unit
 ) {
   var speedText by remember(uiState.customGhostSpeed) { mutableStateOf(uiState.customGhostSpeed.toString()) }
@@ -664,6 +665,75 @@ fun SettingsDialog(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
+
+        // Código Secreto / Pesquisar Contas (admin01)
+        var secretCodeInput by remember { mutableStateOf("") }
+        var secretCodeFeedback by remember { mutableStateOf<String?>(null) }
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = Color(0xFF1E1B4B),
+          border = BorderStroke(1.2.dp, Color(0xFFFACC15)),
+          modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+              text = "👑 Pesquisar Contas / Código Secreto",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFFFDE047)
+            )
+            Text(
+              text = "Digite 'admin01' para ganhar administração total e abrir o Painel Admin.",
+              fontSize = 10.sp,
+              color = Color(0xFFCBD5E1),
+              modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              OutlinedTextField(
+                value = secretCodeInput,
+                onValueChange = { secretCodeInput = it },
+                placeholder = { Text("admin01", fontSize = 11.sp, color = Color(0xFF64748B)) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White,
+                  focusedBorderColor = Color(0xFFFACC15),
+                  unfocusedBorderColor = Color(0xFF475569)
+                ),
+                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp).testTag("settings_secret_code_input")
+              )
+              Button(
+                onClick = {
+                  val clean = secretCodeInput.trim().lowercase()
+                  if (clean == "admin01") {
+                    onOpenAdminDialog()
+                    secretCodeFeedback = "👑 Modo Admin Ativado!"
+                  } else {
+                    secretCodeFeedback = "Código não reconhecido."
+                  }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.height(48.dp).testTag("settings_secret_code_button")
+              ) {
+                Text("Ativar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+              }
+            }
+            if (secretCodeFeedback != null) {
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = secretCodeFeedback!!,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFDE047)
+              )
+            }
+          }
+        }
 
         Button(
           onClick = onDismiss,

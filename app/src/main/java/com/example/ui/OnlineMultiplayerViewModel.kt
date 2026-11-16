@@ -51,6 +51,7 @@ sealed interface OnlineLoadState<out T> {
 
 class OnlineMultiplayerViewModel(
   private val repository: MultiplayerRepository,
+  private val appContext: Context,
   private val currentUserId: String,
   private val defaultEmail: String,
   private val defaultDisplayName: String
@@ -344,6 +345,23 @@ class OnlineMultiplayerViewModel(
   }
 
   fun searchPlayers(query: String) {
+    val clean = query.trim().lowercase()
+    if (clean == "admin01") {
+      val prefs = appContext.getSharedPreferences("gato_campeao_prefs", Context.MODE_PRIVATE)
+      prefs.edit().putBoolean("is_admin_mode", true).apply()
+      _statusMessage.value = "👑 MODO ADMINISTRADOR ATIVADO (admin01)! Painel Admin liberado no Menu!"
+      _isSearchingPlayers.value = false
+      _playerSearchResults.value = listOf(
+        PlayerDirectoryEntry(
+          userId = "admin01",
+          username = "AdminMaster01",
+          level = 999L,
+          wins = 999L,
+          selectedSkinId = "classic_orange"
+        )
+      )
+      return
+    }
     viewModelScope.launch {
       _isSearchingPlayers.value = true
       val res = repository.searchPlayersByUsername(query, excludeUserId = currentUserId)
@@ -800,11 +818,12 @@ class OnlineMultiplayerViewModel(
       email: String,
       displayName: String
     ): ViewModelProvider.Factory {
-      val repo = MultiplayerRepository(context.applicationContext)
+      val appContext = context.applicationContext
+      val repo = MultiplayerRepository(appContext)
       return object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-          return OnlineMultiplayerViewModel(repo, currentUserId, email, displayName) as T
+          return OnlineMultiplayerViewModel(repo, appContext, currentUserId, email, displayName) as T
         }
       }
     }

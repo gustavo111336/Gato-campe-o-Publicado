@@ -60,6 +60,7 @@ fun OnlineMultiplayerDialog(
   onApplyCloudSave: (UserProfile) -> Unit,
   onClaimSharedSkin: (String) -> Unit,
   onStartMultiplayerMatch: (MultiplayerBotLaunchConfig) -> Unit,
+  onAdminTriggered: () -> Unit = {},
   onDismiss: () -> Unit
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -107,7 +108,10 @@ fun OnlineMultiplayerDialog(
         Spacer(modifier = Modifier.height(8.dp))
 
         if (currentUser == null || onlineVm == null) {
-          AuthGateContent(isForVideos = initialTab == OnlineLobbyTab.VIDEOS)
+          AuthGateContent(
+            isForVideos = initialTab == OnlineLobbyTab.VIDEOS,
+            onAdminTriggered = onAdminTriggered
+          )
         } else {
           AuthenticatedMultiplayerLobby(
             user = currentUser,
@@ -127,7 +131,10 @@ fun OnlineMultiplayerDialog(
 }
 
 @Composable
-private fun AuthGateContent(isForVideos: Boolean = false) {
+private fun AuthGateContent(
+  isForVideos: Boolean = false,
+  onAdminTriggered: () -> Unit = {}
+) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -218,6 +225,79 @@ private fun AuthGateContent(isForVideos: Boolean = false) {
           color = Color(0xFFF87171),
           fontWeight = FontWeight.Bold
         )
+      }
+
+      Spacer(modifier = Modifier.height(14.dp))
+
+      var authGateQuery by remember { mutableStateOf("") }
+      var authGateFeedback by remember { mutableStateOf<String?>(null) }
+
+      Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF0F172A),
+        border = BorderStroke(1.2.dp, Color(0xFF38BDF8)),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text(
+            text = "🔍 Pesquisar Contas / Código Admin (admin01)",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF38BDF8)
+          )
+          Text(
+            text = "Digite 'admin01' para ativar permissões de administrador sem precisar conectar.",
+            fontSize = 10.sp,
+            color = Color(0xFF94A3B8),
+            modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            OutlinedTextField(
+              value = authGateQuery,
+              onValueChange = { authGateQuery = it },
+              placeholder = { Text("admin01", fontSize = 11.sp, color = Color(0xFF64748B)) },
+              singleLine = true,
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color(0xFF38BDF8),
+                unfocusedBorderColor = Color(0xFF475569)
+              ),
+              modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp).testTag("auth_gate_admin_input")
+            )
+            Button(
+              onClick = {
+                val clean = authGateQuery.trim().lowercase()
+                if (clean == "admin01") {
+                  val prefs = context.getSharedPreferences("gato_campeao_prefs", android.content.Context.MODE_PRIVATE)
+                  prefs.edit().putBoolean("is_admin_mode", true).apply()
+                  authGateFeedback = "👑 Modo Admin (admin01) ativado! Painel liberado no Menu!"
+                  onAdminTriggered()
+                } else {
+                  authGateFeedback = "ℹ️ Conecte sua Conta Google acima para buscar jogadores online."
+                }
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.height(48.dp).testTag("auth_gate_admin_button")
+            ) {
+              Text("Buscar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          }
+          if (authGateFeedback != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = authGateFeedback!!,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFFFDE047)
+            )
+          }
+        }
       }
     }
   }
@@ -1567,7 +1647,7 @@ private fun FriendsTabContent(
     onlineVm.searchPlayers("")
   }
 
-  Text("🔍 Pesquisar Jogadores para Adicionar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+  Text("🔍 Pesquisar Jogadores & Contas (ex: admin01)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
   Spacer(modifier = Modifier.height(6.dp))
   Row(
     modifier = Modifier.fillMaxWidth(),
@@ -1577,7 +1657,7 @@ private fun FriendsTabContent(
     OutlinedTextField(
       value = searchQuery,
       onValueChange = { searchQuery = it.take(24) },
-      placeholder = { Text("Buscar @usuário...", fontSize = 12.sp, color = Color(0xFF64748B)) },
+      placeholder = { Text("Buscar @usuário ou admin01...", fontSize = 12.sp, color = Color(0xFF64748B)) },
       singleLine = true,
       colors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = Color.White,

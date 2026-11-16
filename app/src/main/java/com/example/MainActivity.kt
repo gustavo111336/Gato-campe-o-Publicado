@@ -278,6 +278,7 @@ class MainActivity : ComponentActivity() {
         // Handle Back button cleanly across all overlays and dialogs
         BackHandler(enabled = true) {
           when {
+            uiState.showAdminDialog -> viewModel.openAdminDialog(false)
             uiState.showPostReplayDialog -> viewModel.openPostReplayDialog(false)
             uiState.showOnlineDialog -> viewModel.openOnlineDialog(false)
             uiState.showShopDialog -> viewModel.openShop(false)
@@ -396,7 +397,9 @@ class MainActivity : ComponentActivity() {
                 onOpenAi = { viewModel.openAiDialog(true) },
                 onCheckUpdate = { runAppUpdateCheck(true) },
                 onSendMeowNotification = triggerMeowNotification,
-                onRestoreDefaultFair = { viewModel.restoreDefaultFairSettings() }
+                onRestoreDefaultFair = { viewModel.restoreDefaultFairSettings() },
+                onOpenAdminDialog = { viewModel.openAdminDialog(true) },
+                onSearchAccount = { viewModel.submitAccountSearch(it) }
               )
             }
 
@@ -529,6 +532,18 @@ class MainActivity : ComponentActivity() {
               )
             }
 
+            if (uiState.showAdminDialog) {
+              AdminPanelDialog(
+                uiState = uiState,
+                onUnlockEverything = { viewModel.adminUnlockEverything() },
+                onSetMoney = { viewModel.adminSetMoney(it) },
+                onSetLevel = { viewModel.adminSetLevel(it) },
+                onSetWins = { viewModel.adminSetWins(it) },
+                onSetRevives = { viewModel.adminSetRevives(it) },
+                onDismiss = { viewModel.openAdminDialog(false) }
+              )
+            }
+
             if (uiState.showCreatorDialog) {
               CreatorStudioDialog(
                 uiState = uiState,
@@ -577,6 +592,10 @@ class MainActivity : ComponentActivity() {
                   } else {
                     viewModel.startNormalGame()
                   }
+                },
+                onAdminTriggered = {
+                  viewModel.openOnlineDialog(false)
+                  viewModel.openAdminDialog(true)
                 },
                 onDismiss = { viewModel.openOnlineDialog(false) }
               )
@@ -654,6 +673,10 @@ class MainActivity : ComponentActivity() {
                 onCheckUpdateNow = { runAppUpdateCheck(true) },
                 onOpenUpdateStore = { updateController.openStoreForUpdate(this@MainActivity) },
                 onSendMeowNotification = triggerMeowNotification,
+                onOpenAdminDialog = {
+                  viewModel.openSettings(false)
+                  viewModel.openAdminDialog(true)
+                },
                 onDismiss = { viewModel.openSettings(false) }
               )
             }

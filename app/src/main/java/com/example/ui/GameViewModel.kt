@@ -169,7 +169,9 @@ data class GameUiState(
   val showCreatorDialog: Boolean = false,
   val showAiDialog: Boolean = false,
   val showOnlineDialog: Boolean = false,
-  val showHelpDialog: Boolean = false
+  val showHelpDialog: Boolean = false,
+  val isAdminMode: Boolean = false,
+  val showAdminDialog: Boolean = false
 )
 
 fun computeRewardsBlocked(
@@ -301,6 +303,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     val godUnlocked = champCount >= 10
     val godEnabled = godUnlocked && prefs.getBoolean("god_mode_enabled", false)
+    val adminModePref = prefs.getBoolean("is_admin_mode", false)
 
     audio.isSoundEnabled = sound
     audio.isHapticEnabled = haptic
@@ -316,6 +319,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     engine.resetGameForMode(ALL_40_MODES.first(), overrideGhostCount = gCount)
 
     val baseState = _uiState.value.copy(
+      isAdminMode = adminModePref,
       championCount = champCount,
       bestTimeSec = bestTime,
       bestHighScore = bestScore,
@@ -1889,6 +1893,100 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
   fun openHelp(open: Boolean) {
     _uiState.value = _uiState.value.copy(showHelpDialog = open)
+  }
+
+  fun openAdminDialog(open: Boolean) {
+    _uiState.value = _uiState.value.copy(showAdminDialog = open)
+  }
+
+  fun submitAccountSearch(query: String) {
+    val clean = query.trim().lowercase()
+    if (clean == "admin01") {
+      prefs.edit().putBoolean("is_admin_mode", true).apply()
+      _uiState.value = _uiState.value.copy(
+        isAdminMode = true,
+        showAdminDialog = true
+      )
+      showTransientFeedback("👑 MODO ADMINISTRADOR ATIVADO (admin01)! Painel aberto!")
+    } else {
+      openOnlineDialog(true, OnlineLobbyTab.FRIENDS)
+      showTransientFeedback("🔍 Abrindo pesquisa de contas...")
+    }
+  }
+
+  fun adminUnlockEverything() {
+    val allAchievements = ALL_40_ACHIEVEMENTS.map { it.id }.toSet()
+    val allItems = ALL_40_ITEMS.map { it.id }.toSet()
+    val allSkins = ALL_HERO_SKINS.map { it.id }.toSet()
+    val allModes = ALL_40_MODES.map { it.id }.toSet()
+
+    prefs.edit()
+      .putBoolean("is_admin_mode", true)
+      .putInt("champion_count", max(100, _uiState.value.championCount))
+      .putInt("spendable_points", max(999999, _uiState.value.spendablePoints))
+      .putInt("player_level", max(999, _uiState.value.playerLevel))
+      .putInt("revive_count", max(999, _uiState.value.reviveCount))
+      .putStringSet("unlocked_achievements", allAchievements)
+      .putStringSet("purchased_skins", allSkins)
+      .putStringSet("purchased_modes", allModes)
+      .putStringSet("purchased_items", allItems)
+      .putStringSet("discovered_items", allItems)
+      .apply()
+
+    val updated = _uiState.value.copy(
+      isAdminMode = true,
+      championCount = max(100, _uiState.value.championCount),
+      spendablePoints = max(999999, _uiState.value.spendablePoints),
+      playerLevel = max(999, _uiState.value.playerLevel),
+      reviveCount = max(999, _uiState.value.reviveCount),
+      unlockedAchievements = allAchievements,
+      purchasedSkinIds = allSkins,
+      purchasedModeIds = allModes,
+      purchasedItemIds = allItems,
+      discoveredItems = allItems,
+      isEndlessUnlocked = true,
+      isGodModeUnlocked = true
+    )
+    _uiState.value = syncDerivedProgress(updated, showBanner = false)
+    showTransientFeedback("👑 TUDO LIBERADO COM SUCESSO PELO ADMIN01!")
+  }
+
+  fun adminSetMoney(amount: Int) {
+    val safe = amount.coerceAtLeast(0)
+    prefs.edit().putInt("spendable_points", safe).putBoolean("is_admin_mode", true).apply()
+    _uiState.value = _uiState.value.copy(isAdminMode = true, spendablePoints = safe)
+    showTransientFeedback("🪙 Dinheiro definido para $safe pts!")
+  }
+
+  fun adminSetLevel(level: Int) {
+    val safe = level.coerceIn(1, 9999)
+    prefs.edit().putInt("player_level", safe).putBoolean("is_admin_mode", true).apply()
+    _uiState.value = _uiState.value.copy(
+      isAdminMode = true,
+      playerLevel = safe,
+      xpToNextLevel = xpRequiredForLevel(safe)
+    )
+    showTransientFeedback("⭐ Nível definido para $safe!")
+  }
+
+  fun adminSetWins(wins: Int) {
+    val safe = wins.coerceAtLeast(0)
+    prefs.edit().putInt("champion_count", safe).putBoolean("is_admin_mode", true).apply()
+    val updated = _uiState.value.copy(
+      isAdminMode = true,
+      championCount = safe,
+      isEndlessUnlocked = safe >= 1 || _uiState.value.purchasedModeIds.contains("endless_infinite"),
+      isGodModeUnlocked = safe >= 10
+    )
+    _uiState.value = syncDerivedProgress(updated, showBanner = false)
+    showTransientFeedback("🏆 Vitórias definidas para $safe!")
+  }
+
+  fun adminSetRevives(amount: Int) {
+    val safe = amount.coerceAtLeast(0)
+    prefs.edit().putInt("revive_count", safe).putBoolean("is_admin_mode", true).apply()
+    _uiState.value = _uiState.value.copy(isAdminMode = true, reviveCount = safe)
+    showTransientFeedback("💖 Revives definidos para $safe!")
   }
 
   fun closeVictoryDialog() {

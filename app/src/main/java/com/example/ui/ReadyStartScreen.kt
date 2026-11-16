@@ -59,6 +59,8 @@ fun ReadyStartScreen(
   onCheckUpdate: () -> Unit,
   onSendMeowNotification: () -> Unit,
   onRestoreDefaultFair: () -> Unit,
+  onOpenAdminDialog: () -> Unit = {},
+  onSearchAccount: (String) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var showBotsConfigDialog by remember { mutableStateOf(false) }
@@ -160,6 +162,27 @@ fun ReadyStartScreen(
           modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
         )
 
+        if (uiState.isAdminMode) {
+          Button(
+            onClick = onOpenAdminDialog,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(bottom = 8.dp)
+              .height(48.dp)
+              .border(2.dp, Color(0xFFFACC15), RoundedCornerShape(16.dp))
+              .testTag("menu_admin_button")
+          ) {
+            Text(
+              text = "👑 PAINEL ADMIN (admin01) ATIVO - TOQUE AQUI",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Black,
+              color = Color.White
+            )
+          }
+        }
+
         // Status & Milestone badges row
         Row(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -210,6 +233,71 @@ fun ReadyStartScreen(
             color = Color(0xFF38BDF8),
             trackColor = Color(0xFF0F172A)
           )
+        }
+
+        // Pesquisar Contas / Código Secreto (admin01)
+        var accountSearchText by remember { mutableStateOf("") }
+        Surface(
+          shape = RoundedCornerShape(16.dp),
+          color = Color(0xFF0F172A),
+          border = BorderStroke(1.2.dp, Color(0xFF38BDF8)),
+          modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+        ) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "🔍 Pesquisar Contas / Código Secreto",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF38BDF8)
+              )
+              if (uiState.isAdminMode) {
+                Text(
+                  text = "👑 Admin Ativo",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Black,
+                  color = Color(0xFFFDE047)
+                )
+              }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              OutlinedTextField(
+                value = accountSearchText,
+                onValueChange = { accountSearchText = it },
+                placeholder = { Text("Digite admin01 ou @conta...", fontSize = 11.sp, color = Color(0xFF64748B)) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White,
+                  focusedBorderColor = Color(0xFF38BDF8),
+                  unfocusedBorderColor = Color(0xFF475569)
+                ),
+                modifier = Modifier
+                  .weight(1f)
+                  .defaultMinSize(minHeight = 44.dp)
+                  .testTag("menu_account_search_input")
+              )
+              Button(
+                onClick = { onSearchAccount(accountSearchText) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                  .height(48.dp)
+                  .testTag("menu_account_search_button")
+              ) {
+                Text("Buscar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+              }
+            }
+          }
         }
 
         if (uiState.isRewardsBlocked) {
