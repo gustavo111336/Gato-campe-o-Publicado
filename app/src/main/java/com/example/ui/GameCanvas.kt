@@ -220,6 +220,22 @@ fun GameCanvas(
           }
         }
 
+        if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretVentsEnabled) {
+          val ventsSnapshot = engine.snapshotSecretVents()
+          for (vent in ventsSnapshot) {
+            val isHeroHere = uiState.isInVent && engine.currentVentId == vent.id
+            drawSecretVent(
+              vent = vent,
+              canUse = uiState.canUseVents,
+              isPlayerGhost = uiState.isPlayerGhost || engine.isPlayerGhost,
+              isHeroInside = isHeroHere,
+              gameTime = frameTime,
+              textPaint = textPaint,
+              is3d = is3d
+            )
+          }
+        }
+
         for (sw in shockwavesSnapshot) {
           val r = max(1f, sw.radius)
           drawCircle(
@@ -320,11 +336,27 @@ fun GameCanvas(
             is3d = is3d,
             gameTime = frameTime
           )
+        } else if (uiState.isInVent) {
+          // Hero is inside the vent; vent grate already renders peeking eyes
         } else {
           if (uiState.isSecretMode && (uiState.isPlayerGhost || engine.isPlayerGhost) && uiState.isLocalPlayerAlive) {
             drawCircle(
-              color = Color(0xFFEF4444).copy(alpha = 0.55f),
+              color = (if (uiState.morphedTargetName != null) Color(0xFFA855F7) else Color(0xFFEF4444)).copy(alpha = 0.55f),
               radius = 33f + sin(frameTime * 5f) * 3f,
+              center = Offset(heroPos.x, heroPos.y - if (is3d) 10f else 0f),
+              style = Stroke(width = 3f)
+            )
+          }
+
+          if (uiState.localMedicShieldSec > 0f) {
+            drawCircle(
+              color = Color(0xFF22D3EE).copy(alpha = 0.25f + sin(frameTime * 8f) * 0.10f),
+              radius = 40f,
+              center = Offset(heroPos.x, heroPos.y - if (is3d) 10f else 0f)
+            )
+            drawCircle(
+              color = Color(0xFF06B6D4),
+              radius = 40f,
               center = Offset(heroPos.x, heroPos.y - if (is3d) 10f else 0f),
               style = Stroke(width = 3f)
             )
@@ -344,13 +376,17 @@ fun GameCanvas(
             )
           }
 
+          val effectiveHeroSkin = uiState.morphedTargetSkinId?.let { morphSkinId ->
+            ALL_HERO_SKINS.find { it.id == morphSkinId }
+          } ?: activeSkin
+
           drawHeroCat(
             pos = heroPos,
             angle = engine.heroAngle,
-            skin = activeSkin,
+            skin = effectiveHeroSkin,
             isInvincible = engine.isInvincible,
             isInvisible = engine.isEffectivelyInvisible || (!uiState.isLocalPlayerAlive && !uiState.isSpectating),
-            hasShield = engine.shieldActive,
+            hasShield = engine.shieldActive || uiState.localMedicShieldSec > 0f,
             hasCatnip = engine.catnipTimer > 0f,
             hasMagnet = engine.magnetTimer > 0f || engine.giantMagnetTimer > 0f,
             hasDoubleCat = engine.doubleCatTimer > 0f,
@@ -359,7 +395,20 @@ fun GameCanvas(
             gameTime = frameTime
           )
 
-          if (uiState.isSpectating) {
+          if (uiState.morphedTargetName != null) {
+            val savedColor = textPaint.color
+            val savedSize = textPaint.textSize
+            textPaint.color = android.graphics.Color.MAGENTA
+            textPaint.textSize = 19f
+            drawContext.canvas.nativeCanvas.drawText(
+              "🎭 @${uiState.morphedTargetName}",
+              heroPos.x,
+              heroPos.y - 48f,
+              textPaint
+            )
+            textPaint.color = savedColor
+            textPaint.textSize = savedSize
+          } else if (uiState.isSpectating) {
             val savedColor = textPaint.color
             val savedSize = textPaint.textSize
             textPaint.color = android.graphics.Color.YELLOW
@@ -483,6 +532,15 @@ fun GameCanvas(
           catPos = target,
           screenSize = size,
           isGhostHunt = uiState.isPlayerGhost || engine.isPlayerGhost
+        )
+      }
+
+      uiState.detectiveRadarTargetPos?.let { radarPos ->
+        drawCatTrackerCompass(
+          heroPos = heroPos,
+          catPos = radarPos,
+          screenSize = size,
+          isGhostHunt = true
         )
       }
 
@@ -659,6 +717,11 @@ private fun DrawScope.drawBotCat(
   val lift = if (is3d) -9f else 0f
   val center = Offset(bot.position.x, bot.position.y + lift)
 
+  if (bot.isAlive && bot.inVentTimer > 0f) {
+    // Bot is hidden inside vent
+    return
+  }
+
   if (bot.isAlive && bot.invincibleTimer > 0f && (gameTime * 14f).toInt() % 2 == 0) {
     return
   }
@@ -675,11 +738,16 @@ private fun DrawScope.drawBotCat(
     drawCircle(color = Color(0xFF94A3B8).copy(alpha = 0.28f), radius = 19f, center = center)
     drawCircle(color = Color(0xFFEF4444).copy(alpha = 0.55f), radius = 19f, center = center, style = Stroke(width = 2f))
   } else {
-    val skin = if (isSecretMode) ALL_HERO_SKINS.find { it.id == bot.skinId } else null
-    val bodyColor = skin?.furColor ?: bot.furColor
-    val earColor = skin?.earColor ?: bot.furColor
+    val activeSkinId = if (bot.morphedTimer > 0f && bot.morphedAsSkinId != null) bot.morphedAsSkinId!! else bot.skinId
+    val skin = if (isSecretMode) ALL_HERO_SKINS.find { it.id == activeSkinId } else null
+    val bodyColor = skin?.furColor ?: (if (bot.morphedTimer > 0f && bot.morphedAsFurColor != null) bot.morphedAsFurColor!! else bot.furColor)
+    val earColor = skin?.earColor ?: bodyColor
     val haloR = 30f + sin(gameTime * 6f + bot.id) * 3f
     drawCircle(color = bodyColor.copy(alpha = 0.24f), radius = haloR, center = center)
+    if (bot.shieldTimer > 0f) {
+      drawCircle(color = Color(0xFF06B6D4).copy(alpha = 0.28f), radius = 32f, center = center)
+      drawCircle(color = Color(0xFF22D3EE), radius = 32f, center = center, style = Stroke(width = 2.5f))
+    }
     drawCircle(color = bodyColor, radius = 19f, center = center)
     drawCircle(color = Color.White, radius = 19f, center = center, style = Stroke(width = 2f))
 
@@ -707,9 +775,14 @@ private fun DrawScope.drawBotCat(
       else -> android.graphics.Color.YELLOW
     }
     textPaint.textSize = 20f
+    val displayName = if (bot.isAlive && bot.morphedTimer > 0f && !bot.morphedAsName.isNullOrBlank()) {
+      bot.morphedAsName!!
+    } else {
+      bot.name
+    }
     val labelText = when {
       !bot.isAlive -> "💀 ${bot.name}"
-      isSecretMode -> "@${bot.name} (${bot.catsCollected})"
+      isSecretMode -> "@$displayName (${bot.catsCollected})"
       else -> "${bot.accentEmoji} ${bot.name} (${bot.catsCollected}/$goalCats)"
     }
     drawContext.canvas.nativeCanvas.drawText(
@@ -1419,4 +1492,92 @@ private fun DrawScope.drawSecretTaskStation(
   textPaint.color = savedTextColor
   textPaint.textSize = savedTextSize
 }
+
+private fun DrawScope.drawSecretVent(
+  vent: com.example.model.SecretVentDef,
+  canUse: Boolean,
+  isPlayerGhost: Boolean,
+  isHeroInside: Boolean,
+  gameTime: Float,
+  textPaint: Paint,
+  is3d: Boolean
+) {
+  val pos = vent.position
+  val frameColor = when {
+    isHeroInside -> Color(0xFFFDE047)
+    canUse && isPlayerGhost -> Color(0xFFEF4444)
+    canUse -> Color(0xFF10B981)
+    else -> Color(0xFF64748B)
+  }
+
+  if (is3d) {
+    drawRect(
+      color = Color.Black.copy(alpha = 0.45f),
+      topLeft = Offset(pos.x - 28f, pos.y - 18f),
+      size = Size(58f, 44f)
+    )
+  }
+
+  // Outer vent glow ring if usable
+  if (canUse) {
+    drawCircle(
+      color = frameColor.copy(alpha = 0.28f + sin(gameTime * 5f) * 0.1f),
+      radius = 36f,
+      center = Offset(pos.x, pos.y),
+      style = Stroke(width = 2.5f)
+    )
+  }
+
+  // Metallic plate body
+  drawRect(
+    color = Color(0xFF1E293B),
+    topLeft = Offset(pos.x - 26f, pos.y - 20f),
+    size = Size(52f, 40f)
+  )
+  drawRect(
+    color = frameColor,
+    topLeft = Offset(pos.x - 26f, pos.y - 20f),
+    size = Size(52f, 40f),
+    style = Stroke(width = 3f)
+  )
+
+  // Vent grating slats
+  for (row in -1..1) {
+    val barY = pos.y + row * 10f
+    drawLine(
+      color = Color(0xFF020617),
+      start = Offset(pos.x - 19f, barY),
+      end = Offset(pos.x + 19f, barY),
+      strokeWidth = 4.5f,
+      cap = StrokeCap.Round
+    )
+  }
+
+  // Peeking cat eyes if Hero is hidden inside
+  if (isHeroInside) {
+    drawCircle(color = Color(0xFFFDE047), radius = 3.5f, center = Offset(pos.x - 7f, pos.y))
+    drawCircle(color = Color(0xFFFDE047), radius = 3.5f, center = Offset(pos.x + 7f, pos.y))
+  }
+
+  // Corner bolts
+  val boltColor = Color(0xFF94A3B8)
+  drawCircle(boltColor, 2.2f, Offset(pos.x - 21f, pos.y - 15f))
+  drawCircle(boltColor, 2.2f, Offset(pos.x + 21f, pos.y - 15f))
+  drawCircle(boltColor, 2.2f, Offset(pos.x - 21f, pos.y + 15f))
+  drawCircle(boltColor, 2.2f, Offset(pos.x + 21f, pos.y + 15f))
+
+  val savedColor = textPaint.color
+  val savedSize = textPaint.textSize
+  textPaint.color = if (canUse) android.graphics.Color.WHITE else android.graphics.Color.LTGRAY
+  textPaint.textSize = 17f
+  drawContext.canvas.nativeCanvas.drawText(
+    "🕳️ ${vent.roomName}",
+    pos.x,
+    pos.y - 28f,
+    textPaint
+  )
+  textPaint.color = savedColor
+  textPaint.textSize = savedSize
+}
+
 

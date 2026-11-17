@@ -156,6 +156,27 @@ data class GameUiState(
   val nearestKillTargetName: String? = null,
   val isSpectating: Boolean = false,
   val secretTasksEnabled: Boolean = false,
+  val secretVentsEnabled: Boolean = true,
+  val secretRolesEnabled: Boolean = true,
+  val secretShapeshifterEnabled: Boolean = true,
+  val localSecretRole: SecretRole = SecretRole.INNOCENT,
+  val isInVent: Boolean = false,
+  val currentVentRoomName: String? = null,
+  val nearestVent: SecretVentDef? = null,
+  val canUseVents: Boolean = false,
+  val ventCooldownSec: Float = 0f,
+  val ventRemainSec: Float = 0f,
+  val morphedTargetName: String? = null,
+  val morphedTargetSkinId: String? = null,
+  val morphedTimeSec: Float = 0f,
+  val morphCooldownSec: Float = 0f,
+  val showMorphPickerDialog: Boolean = false,
+  val morphCandidates: List<MorphTargetInfo> = emptyList(),
+  val detectiveRadarCooldownSec: Float = 0f,
+  val detectiveRadarTargetPos: Vector2D? = null,
+  val detectiveRadarClueText: String = "",
+  val medicShieldCooldownSec: Float = 0f,
+  val localMedicShieldSec: Float = 0f,
   val teamTasksCompletedPercent: Float = 0f,
   val nearestTaskStation: com.example.model.SecretTaskStationDef? = null,
   val activeTaskStationDialog: com.example.model.SecretTaskStationDef? = null,
@@ -1104,6 +1125,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     botCount: Int,
     secretMode: Boolean,
     tasksEnabled: Boolean = true,
+    rolesEnabled: Boolean = true,
+    shapeshifterEnabled: Boolean = true,
+    ventsEnabled: Boolean = true,
+    rolePreference: SecretRolePreference = SecretRolePreference.RANDOM,
     localUsername: String = "Você",
     roomCode: String = ""
   ) {
@@ -1116,6 +1141,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         botCount = safeBots,
         secretMode = effectiveSecret,
         tasksEnabled = tasksEnabled,
+        rolesEnabled = rolesEnabled,
+        shapeshifterEnabled = shapeshifterEnabled,
+        ventsEnabled = ventsEnabled,
+        rolePreference = rolePreference,
         localUsername = localUsername,
         roomCode = roomCode
       )
@@ -1126,6 +1155,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     botCount: Int,
     secretMode: Boolean,
     tasksEnabled: Boolean = true,
+    rolesEnabled: Boolean = true,
+    shapeshifterEnabled: Boolean = true,
+    ventsEnabled: Boolean = true,
+    rolePreference: SecretRolePreference = SecretRolePreference.RANDOM,
     localUsername: String,
     roomCode: String
   ) {
@@ -1134,6 +1167,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     botSecretLocalUsername = localUsername.ifBlank { "Você" }
     botSecretRoomCode = roomCode
     botMeetingRound = 0
+
+    engine.secretTasksEnabled = tasksEnabled && effectiveSecret
+    engine.secretRolesEnabled = rolesEnabled && effectiveSecret
+    engine.secretShapeshifterEnabled = shapeshifterEnabled && rolesEnabled && effectiveSecret
+    engine.secretVentsEnabled = ventsEnabled && effectiveSecret
+    engine.secretRolePreference = if (effectiveSecret) rolePreference else SecretRolePreference.RANDOM
 
     val botMode = BOTS_ARENA_MODE.copy(
       id = if (effectiveSecret) "bots_secret_$safeBots" else "bots_multi_$safeBots",
@@ -1147,7 +1186,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     )
     startMode(botMode)
 
-    engine.secretTasksEnabled = tasksEnabled && effectiveSecret
     engine.isSpectating = false
     engine.teamTasksCompletedPercent = 0f
 
@@ -1160,6 +1198,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       isLocalPlayerAlive = true,
       isSpectating = false,
       secretTasksEnabled = engine.secretTasksEnabled,
+      secretVentsEnabled = engine.secretVentsEnabled,
+      secretRolesEnabled = engine.secretRolesEnabled,
+      secretShapeshifterEnabled = engine.secretShapeshifterEnabled,
+      localSecretRole = engine.localSecretRole,
+      isInVent = false,
+      showMorphPickerDialog = false,
       teamTasksCompletedPercent = 0f,
       activeTaskStationDialog = null,
       aliveBotsCount = engine.bots.count { it.isAlive },
@@ -1167,11 +1211,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       botSecretMeetingPlayers = emptyList()
     )
 
+    val roleInfo = engine.localSecretRole
     val introMsg = when {
-      effectiveSecret && engine.isPlayerGhost ->
-        "🎭 Modo Secreto ($safeBots bots): VOCÊ é o Fantasma disfarçado! Use 🗡️ Matar!"
       effectiveSecret ->
-        "🕵️ Modo Secreto ($safeBots bots): 1 Bot é o Fantasma disfarçado! Observe e aperte 🚨 Denunciar!"
+        "${roleInfo.emoji} Função: ${roleInfo.title} — ${roleInfo.summary}"
       else ->
         "🤖 Partida iniciada com $safeBots bot(s)! Meta: 20 gatos!"
     }
@@ -1231,6 +1274,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       startMultiplayerBotsGame(
         botCount = engine.currentMode.botCount.coerceAtLeast(1),
         secretMode = engine.currentMode.id.startsWith("bots_secret_"),
+        tasksEnabled = engine.secretTasksEnabled,
+        rolesEnabled = engine.secretRolesEnabled,
+        shapeshifterEnabled = engine.secretShapeshifterEnabled,
+        ventsEnabled = engine.secretVentsEnabled,
+        rolePreference = engine.secretRolePreference,
         localUsername = botSecretLocalUsername,
         roomCode = botSecretRoomCode
       )
@@ -1780,6 +1828,69 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     returnToMenu()
   }
 
+  fun toggleEnterExitVent() {
+    if (engine.toggleEnterExitVent()) {
+      val currentVent = engine.snapshotSecretVents().firstOrNull { it.id == engine.currentVentId }
+      _uiState.value = _uiState.value.copy(
+        isInVent = engine.isInVent,
+        currentVentRoomName = if (engine.isInVent) currentVent?.roomName else null
+      )
+    }
+  }
+
+  fun hopToVent(direction: Int) {
+    val vent = engine.hopToVent(direction)
+    if (vent != null) {
+      _uiState.value = _uiState.value.copy(
+        isInVent = true,
+        currentVentRoomName = vent.roomName
+      )
+    }
+  }
+
+  fun openMorphPickerDialog(open: Boolean) {
+    val candidates = if (open) engine.getMorphCandidates() else emptyList()
+    _uiState.value = _uiState.value.copy(
+      showMorphPickerDialog = open,
+      morphCandidates = candidates
+    )
+  }
+
+  fun activateMorph(targetUid: String) {
+    val name = engine.activateMorph(targetUid)
+    _uiState.value = _uiState.value.copy(
+      showMorphPickerDialog = false,
+      morphedTargetName = engine.morphedTargetName,
+      morphedTargetSkinId = engine.morphedTargetSkinId
+    )
+    if (name != null) {
+      showTransientFeedback("🎭 Você se transformou em @$name!")
+    }
+  }
+
+  fun revertMorph() {
+    engine.revertMorph()
+    _uiState.value = _uiState.value.copy(
+      showMorphPickerDialog = false,
+      morphedTargetName = null,
+      morphedTargetSkinId = null
+    )
+  }
+
+  fun triggerDetectiveRadar() {
+    val clue = engine.triggerDetectiveRadar()
+    if (clue != null) {
+      showTransientFeedback(clue)
+    }
+  }
+
+  fun triggerMedicShield() {
+    val msg = engine.triggerMedicShield()
+    if (msg != null) {
+      showTransientFeedback(msg)
+    }
+  }
+
   fun exportCloudSavePayload(): CloudSavePayload {
     val st = _uiState.value
     return CloudSavePayload(
@@ -2135,6 +2246,25 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           isLocalPlayerAlive = engine.localPlayerAlive,
           isSpectating = engine.isSpectating,
           secretTasksEnabled = engine.secretTasksEnabled,
+          secretVentsEnabled = engine.secretVentsEnabled,
+          secretRolesEnabled = engine.secretRolesEnabled,
+          secretShapeshifterEnabled = engine.secretShapeshifterEnabled,
+          localSecretRole = engine.localSecretRole,
+          isInVent = engine.isInVent,
+          currentVentRoomName = if (engine.isInVent) engine.snapshotSecretVents().firstOrNull { it.id == engine.currentVentId }?.roomName else null,
+          nearestVent = engine.nearestVent(125f),
+          canUseVents = engine.canLocalPlayerUseVents(),
+          ventCooldownSec = engine.ventCooldownTimer.coerceAtLeast(0f),
+          ventRemainSec = engine.ventRemainTimer.coerceAtLeast(0f),
+          morphedTargetName = engine.morphedTargetName,
+          morphedTargetSkinId = engine.morphedTargetSkinId,
+          morphedTimeSec = engine.morphedTimer.coerceAtLeast(0f),
+          morphCooldownSec = engine.morphCooldownTimer.coerceAtLeast(0f),
+          detectiveRadarCooldownSec = engine.detectiveRadarCooldownTimer.coerceAtLeast(0f),
+          detectiveRadarTargetPos = engine.detectiveRadarTargetPos,
+          detectiveRadarClueText = engine.detectiveRadarClueText,
+          medicShieldCooldownSec = engine.medicShieldCooldownTimer.coerceAtLeast(0f),
+          localMedicShieldSec = engine.localMedicShieldTimer.coerceAtLeast(0f),
           teamTasksCompletedPercent = engine.teamTasksCompletedPercent,
           nearestTaskStation = engine.nearestTaskStation(130f),
           eliminatedUserIds = engine.eliminatedUserIds,

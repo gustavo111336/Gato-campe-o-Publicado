@@ -99,7 +99,29 @@ class GameEngine(
   var pendingBotMeetingCaller: String? = null
   var isSpectating = false
   var secretTasksEnabled = true
+  var secretVentsEnabled = true
+  var secretRolesEnabled = true
+  var secretShapeshifterEnabled = true
+  var secretRolePreference: SecretRolePreference = SecretRolePreference.RANDOM
+  var localSecretRole: SecretRole = SecretRole.INNOCENT
   val secretTaskStations = mutableListOf<SecretTaskStationDef>()
+  val secretVents = mutableListOf<SecretVentDef>()
+  var isInVent = false
+  var currentVentId: String? = null
+  var ventRemainTimer = 0f
+  var ventCooldownTimer = 0f
+  var morphedTargetUid: String? = null
+  var morphedTargetName: String? = null
+  var morphedTargetSkinId: String? = null
+  var morphedTargetFurColor: Color? = null
+  var morphedTimer = 0f
+  var morphCooldownTimer = 0f
+  var detectiveRadarTimer = 0f
+  var detectiveRadarTargetPos: Vector2D? = null
+  var detectiveRadarClueText: String = ""
+  var detectiveRadarCooldownTimer = 0f
+  var medicShieldCooldownTimer = 0f
+  var localMedicShieldTimer = 0f
   var teamTasksCompletedPercent = 0f
   var totalBotTasksDoneCount = 0
   private var botTaskWorkTimer = 0f
@@ -226,6 +248,263 @@ class GameEngine(
     secretTaskStations.map { it.copy() }
   }
 
+  fun snapshotSecretVents(): List<SecretVentDef> = synchronized(stateLock) {
+    secretVents.toList()
+  }
+
+  fun nearestVent(range: Float = 115f): SecretVentDef? = synchronized(stateLock) {
+    if (!secretVentsEnabled || secretVents.isEmpty()) return null
+    val candidate = secretVents.minByOrNull { (it.position - heroPosition).length() } ?: return null
+    return if ((candidate.position - heroPosition).length() <= range) candidate else null
+  }
+
+  fun canLocalPlayerUseVents(): Boolean = synchronized(stateLock) {
+    (isSecretMode || isBotSecretMode) &&
+      secretVentsEnabled &&
+      localPlayerAlive &&
+      (isPlayerGhost || localSecretRole == SecretRole.ENGINEER)
+  }
+
+  fun canLocalPlayerMorph(): Boolean = synchronized(stateLock) {
+    (isSecretMode || isBotSecretMode) &&
+      secretShapeshifterEnabled &&
+      isPlayerGhost &&
+      localPlayerAlive &&
+      localSecretRole == SecretRole.SHAPESHIFTER
+  }
+
+  fun getMorphCandidates(): List<MorphTargetInfo> = synchronized(stateLock) {
+    if (isBotSecretMode) {
+      bots.filter { it.isAlive && !it.isSecretImpostor }.map { bot ->
+        MorphTargetInfo(
+          uid = bot.uid,
+          name = bot.name,
+          skinId = bot.skinId,
+          furColor = bot.furColor,
+          accentEmoji = bot.accentEmoji
+        )
+      }
+    } else {
+      remotePlayers.filter { !eliminatedUserIds.contains(it.userId) && it.role != "ghost" }.map { rp ->
+        val skin = ALL_HERO_SKINS.find { it.id == rp.skinId } ?: ALL_HERO_SKINS.first()
+        MorphTargetInfo(
+          uid = rp.userId,
+          name = rp.username,
+          skinId = rp.skinId,
+          furColor = skin.furColor,
+          accentEmoji = skin.badgeEmoji
+        )
+      }
+    }
+  }
+
+  fun toggleEnterExitVent(): Boolean = synchronized(stateLock) {
+    if (!canLocalPlayerUseVents()) return false
+    if (isInVent) {
+      isInVent = false
+      ventRemainTimer = 0f
+      ventCooldownTimer = if (isPlayerGhost) 1.2f else 5.5f
+      audio?.playPowerUpSound()
+      audio?.vibrateCollect()
+      spawnVentBurstParticles(heroPosition, Color(0xFF38BDF8))
+      addFloatingTextSafe(
+        FloatingText(
+          text = "🕳️ Saiu do duto!",
+          position = heroPosition + Vector2D(0f, -40f),
+          color = Color(0xFF38BDF8),
+          lifetime = 1.6f
+        )
+      )
+      return true
+    }
+
+    if (ventCooldownTimer > 0f) return false
+    val vent = nearestVent(125f) ?: return false
+    isInVent = true
+    currentVentId = vent.id
+    heroPosition = vent.position
+    heroVelocity = Vector2D(0f, 0f)
+    ventRemainTimer = if (isPlayerGhost) 999f else 10.0f
+    audio?.playPowerUpSound()
+    audio?.vibrateCollect()
+    spawnVentBurstParticles(vent.position, Color(0xFF10B981))
+    addFloatingTextSafe(
+      FloatingText(
+        text = "🕳️ Entrou no ${vent.name}!",
+        position = vent.position + Vector2D(0f, -45f),
+        color = Color(0xFF34D399),
+        lifetime = 1.8f
+      )
+    )
+    return true
+  }
+
+  fun hopToVent(direction: Int): SecretVentDef? = synchronized(stateLock) {
+    if (!isInVent || secretVents.isEmpty()) return null
+    val currentIndex = secretVents.indexOfFirst { it.id == currentVentId }.coerceAtLeast(0)
+    val nextIndex = ((currentIndex + direction) % secretVents.size + secretVents.size) % secretVents.size
+    val targetVent = secretVents[nextIndex]
+    currentVentId = targetVent.id
+    heroPosition = targetVent.position
+    heroVelocity = Vector2D(0f, 0f)
+    audio?.vibrateCollect()
+    spawnVentBurstParticles(targetVent.position, Color(0xFF38BDF8))
+    addFloatingTextSafe(
+      FloatingText(
+        text = "🕳️ ${targetVent.roomName}",
+        position = targetVent.position + Vector2D(0f, -42f),
+        color = Color(0xFF38BDF8),
+        lifetime = 1.4f
+      )
+    )
+    return targetVent
+  }
+
+  fun activateMorph(targetUid: String): String? = synchronized(stateLock) {
+    if (!canLocalPlayerMorph() || morphCooldownTimer > 0f) return null
+    val candidate = getMorphCandidates().firstOrNull { it.uid == targetUid } ?: return null
+    morphedTargetUid = candidate.uid
+    morphedTargetName = candidate.name
+    morphedTargetSkinId = candidate.skinId
+    morphedTargetFurColor = candidate.furColor
+    morphedTimer = 16.0f
+    morphCooldownTimer = 0f
+    audio?.playPowerUpSound()
+    audio?.vibrateCollect()
+    spawnVentBurstParticles(heroPosition, Color(0xFFA855F7))
+    addFloatingTextSafe(
+      FloatingText(
+        text = "🎭 Metamorfose em @${candidate.name}!",
+        position = heroPosition + Vector2D(0f, -48f),
+        color = Color(0xFFE879F9),
+        lifetime = 2.4f
+      )
+    )
+    return candidate.name
+  }
+
+  fun revertMorph() = synchronized(stateLock) {
+    if (morphedTargetUid == null) return
+    morphedTargetUid = null
+    morphedTargetName = null
+    morphedTargetSkinId = null
+    morphedTargetFurColor = null
+    morphedTimer = 0f
+    morphCooldownTimer = 15.0f
+    audio?.vibrateCollect()
+    spawnVentBurstParticles(heroPosition, Color(0xFFC084FC))
+    addFloatingTextSafe(
+      FloatingText(
+        text = "💨 Disfarce desfeito!",
+        position = heroPosition + Vector2D(0f, -40f),
+        color = Color(0xFFC084FC),
+        lifetime = 1.8f
+      )
+    )
+  }
+
+  fun triggerDetectiveRadar(): String? = synchronized(stateLock) {
+    if (!(isSecretMode || isBotSecretMode) || !localPlayerAlive || localSecretRole != SecretRole.DETECTIVE) return null
+    if (detectiveRadarCooldownTimer > 0f) return null
+
+    detectiveRadarCooldownTimer = 12.0f
+    detectiveRadarTimer = 6.0f
+    audio?.playSonicMeowSound()
+    audio?.vibrateCollect()
+
+    val clue: String
+    if (isBotSecretMode) {
+      val impostorBot = bots.firstOrNull { it.isAlive && it.isSecretImpostor }
+      val unrepBody = bots.firstOrNull { !it.isAlive && !it.bodyReported }
+      val target = impostorBot ?: unrepBody
+      if (target != null) {
+        detectiveRadarTargetPos = target.position
+        val dist = (target.position - heroPosition).length().toInt()
+        val morphAlert = if (impostorBot != null && impostorBot.morphedTimer > 0f) " ⚠️ METAMORFO ATIVO!" else ""
+        clue = if (impostorBot != null) {
+          "🔍 Radar: Suspeito detectado a ${dist}px!$morphAlert"
+        } else {
+          "🔍 Radar: Corpo não reportado a ${dist}px!"
+        }
+      } else {
+        detectiveRadarTargetPos = null
+        clue = "🔍 Radar limpo no momento!"
+      }
+    } else {
+      val ghostPlayer = remotePlayers.firstOrNull { it.role == "ghost" && !eliminatedUserIds.contains(it.userId) }
+      if (ghostPlayer != null) {
+        detectiveRadarTargetPos = ghostPlayer.position
+        val dist = (ghostPlayer.position - heroPosition).length().toInt()
+        clue = "🔍 Radar: Fantasma detectado a ${dist}px!"
+      } else {
+        detectiveRadarTargetPos = null
+        clue = "🔍 Radar: Nenhuma assinatura suspeita próxima!"
+      }
+    }
+    detectiveRadarClueText = clue
+    addFloatingTextSafe(
+      FloatingText(
+        text = clue,
+        position = heroPosition + Vector2D(0f, -52f),
+        color = Color(0xFFFBBF24),
+        lifetime = 3.0f
+      )
+    )
+    return clue
+  }
+
+  fun triggerMedicShield(): String? = synchronized(stateLock) {
+    if (!(isSecretMode || isBotSecretMode) || !localPlayerAlive || localSecretRole != SecretRole.MEDIC) return null
+    if (medicShieldCooldownTimer > 0f) return null
+
+    medicShieldCooldownTimer = 14.0f
+    audio?.playPowerUpSound()
+    audio?.vibrateCollect()
+
+    val nearbyBot = if (isBotSecretMode) {
+      bots.filter { it.isAlive }.minByOrNull { (it.position - heroPosition).length() }
+        ?.takeIf { (it.position - heroPosition).length() <= 170f }
+    } else null
+
+    val msg: String
+    if (nearbyBot != null) {
+      nearbyBot.shieldTimer = 11.0f
+      localMedicShieldTimer = max(localMedicShieldTimer, 6.0f)
+      msg = "🩺 Escudo aplicado em ${nearbyBot.name} (e em você)!"
+      spawnVentBurstParticles(nearbyBot.position, Color(0xFF06B6D4))
+    } else {
+      localMedicShieldTimer = 10.0f
+      msg = "🩺 Escudo Médico ativado em você (10s)!"
+      spawnVentBurstParticles(heroPosition, Color(0xFF06B6D4))
+    }
+
+    addFloatingTextSafe(
+      FloatingText(
+        text = msg,
+        position = heroPosition + Vector2D(0f, -50f),
+        color = Color(0xFF22D3EE),
+        lifetime = 2.6f
+      )
+    )
+    return msg
+  }
+
+  private fun spawnVentBurstParticles(pos: Vector2D, color: Color) {
+    for (i in 0 until 14) {
+      val angle = Random.nextFloat() * 2f * PI.toFloat()
+      val spd = Random.nextFloat() * 140f + 35f
+      addParticleSafe(
+        Particle(
+          position = pos,
+          velocity = Vector2D(cos(angle) * spd, sin(angle) * spd),
+          color = color,
+          size = 6.5f,
+          life = 0.55f
+        )
+      )
+    }
+  }
+
   fun nearestTaskStation(range: Float = 95f): SecretTaskStationDef? = synchronized(stateLock) {
     if (!secretTasksEnabled || secretTaskStations.isEmpty()) return null
     val candidate = secretTaskStations.minByOrNull { (it.position - heroPosition).length() } ?: return null
@@ -336,11 +615,25 @@ class GameEngine(
   }
 
   fun killBotInSecretMode(botUid: String): String? = synchronized(stateLock) {
-    if (!isBotSecretMode || !botSecretLocalIsImpostor || !localPlayerAlive || secretKillCooldownTimer > 0f) {
+    if (!isBotSecretMode || !botSecretLocalIsImpostor || !localPlayerAlive || secretKillCooldownTimer > 0f || isInVent) {
       return null
     }
-    val bot = bots.firstOrNull { it.uid == botUid && it.isAlive && !it.isSecretImpostor } ?: return null
+    val bot = bots.firstOrNull { it.uid == botUid && it.isAlive && !it.isSecretImpostor && it.inVentTimer <= 0f } ?: return null
     if ((bot.position - heroPosition).length() > 260f) return null
+    if (bot.shieldTimer > 0f) {
+      bot.shieldTimer = 0f
+      secretKillCooldownTimer = 5.0f
+      spawnVentBurstParticles(bot.position, Color(0xFF22D3EE))
+      addFloatingTextSafe(
+        FloatingText(
+          text = "🩺 ${bot.name} tinha Escudo Médico!",
+          position = bot.position + Vector2D(0f, -45f),
+          color = Color(0xFF22D3EE),
+          lifetime = 2.0f
+        )
+      )
+      return null
+    }
     bot.isAlive = false
     bot.bodyReported = false
     triggerSecretKillFeedback(bot.name, bot.position)
@@ -357,6 +650,12 @@ class GameEngine(
     var wasImpostor = false
     if (targetUid == "LOCAL_PLAYER") {
       localPlayerAlive = false
+      isSpectating = true
+      isInVent = false
+      morphedTargetUid = null
+      morphedTargetName = null
+      morphedTargetSkinId = null
+      morphedTargetFurColor = null
       lives = 0
       wasImpostor = botSecretLocalIsImpostor
     } else {
@@ -374,10 +673,25 @@ class GameEngine(
     isPausedByMeeting = false
     pendingBotMeetingCaller = null
     botReportCooldownTimer = 6.0f
+    isInVent = false
+    currentVentId = null
+    if (morphedTargetUid != null) {
+      morphedTargetUid = null
+      morphedTargetName = null
+      morphedTargetSkinId = null
+      morphedTargetFurColor = null
+      morphedTimer = 0f
+    }
     bots.forEach { b ->
       if (!b.isAlive) {
         b.bodyReported = true
       }
+      b.inVentTimer = 0f
+      b.morphedTimer = 0f
+      b.morphedAsUid = null
+      b.morphedAsName = null
+      b.morphedAsSkinId = null
+      b.morphedAsFurColor = null
       b.killCooldownTimer = max(b.killCooldownTimer, 8.0f)
     }
     if (botSecretLocalIsImpostor) {
@@ -438,16 +752,60 @@ class GameEngine(
     }
     isBotSecretMode = mode.id.startsWith("bots_secret_")
     val totalCustomBots = if (mode.isBotsMode && mode.botCount > 0) mode.botCount.coerceIn(1, 40) else 0
-    val impostorSlot = if (isBotSecretMode && totalCustomBots > 2) Random.nextInt(totalCustomBots + 1) else -1
+    val impostorSlot = if (isBotSecretMode && totalCustomBots > 2) {
+      when {
+        secretRolePreference == SecretRolePreference.SHAPESHIFTER && secretShapeshifterEnabled -> 0
+        secretRolesEnabled && secretRolePreference in listOf(
+          SecretRolePreference.ENGINEER,
+          SecretRolePreference.DETECTIVE,
+          SecretRolePreference.MEDIC,
+          SecretRolePreference.INNOCENT
+        ) -> 1 + Random.nextInt(totalCustomBots)
+        else -> Random.nextInt(totalCustomBots + 1)
+      }
+    } else -1
     botSecretLocalIsImpostor = isBotSecretMode && impostorSlot == 0
     isSecretMode = isBotSecretMode || (isMultiplayerActive && isSecretMode && !mode.isBotsMode)
     localPlayerAlive = true
     isSpectating = false
+    isInVent = false
+    currentVentId = null
+    ventRemainTimer = 0f
+    ventCooldownTimer = 0f
+    morphedTargetUid = null
+    morphedTargetName = null
+    morphedTargetSkinId = null
+    morphedTargetFurColor = null
+    morphedTimer = 0f
+    morphCooldownTimer = if (botSecretLocalIsImpostor) 3.0f else 0f
+    detectiveRadarTimer = 0f
+    detectiveRadarTargetPos = null
+    detectiveRadarClueText = ""
+    detectiveRadarCooldownTimer = 0f
+    medicShieldCooldownTimer = 0f
+    localMedicShieldTimer = 0f
     pendingBotMeetingCaller = null
     botReportCooldownTimer = 0f
     totalBotTasksDoneCount = 0
     botTaskWorkTimer = 0f
     teamTasksCompletedPercent = 0f
+
+    localSecretRole = when {
+      !(isSecretMode || isBotSecretMode) -> SecretRole.INNOCENT
+      isPlayerGhost -> if (secretShapeshifterEnabled) SecretRole.SHAPESHIFTER else SecretRole.IMPOSTOR
+      !secretRolesEnabled -> SecretRole.INNOCENT
+      secretRolePreference == SecretRolePreference.ENGINEER -> SecretRole.ENGINEER
+      secretRolePreference == SecretRolePreference.DETECTIVE -> SecretRole.DETECTIVE
+      secretRolePreference == SecretRolePreference.MEDIC -> SecretRole.MEDIC
+      secretRolePreference == SecretRolePreference.INNOCENT -> SecretRole.INNOCENT
+      else -> listOf(
+        SecretRole.ENGINEER,
+        SecretRole.DETECTIVE,
+        SecretRole.MEDIC,
+        SecretRole.INNOCENT
+      ).random()
+    }
+
     secretTaskStations.clear()
     if ((isSecretMode || isBotSecretMode) && secretTasksEnabled) {
       secretTaskStations.addAll(
@@ -457,6 +815,19 @@ class GameEngine(
           SecretTaskStationDef("task_download", "Terminal Central", "Comunicações", "💻", Vector2D(worldWidth * 0.50f, worldHeight * 0.50f), SecretTaskType.DOWNLOAD),
           SecretTaskStationDef("task_filter", "Filtro de Ar", "Armazém", "🧹", Vector2D(worldWidth * 0.25f, worldHeight * 0.78f), SecretTaskType.FILTER),
           SecretTaskStationDef("task_antenna", "Antena Satélite", "Navegação", "📡", Vector2D(worldWidth * 0.80f, worldHeight * 0.82f), SecretTaskType.ANTENNA)
+        )
+      )
+    }
+
+    secretVents.clear()
+    if ((isSecretMode || isBotSecretMode) && secretVentsEnabled) {
+      secretVents.addAll(
+        listOf(
+          SecretVentDef("vent_elec", "Duto Elétrica", "Elétrica", clampAndResolveObstacles(Vector2D(worldWidth * 0.14f, worldHeight * 0.22f), 26f)),
+          SecretVentDef("vent_cafe", "Duto Cafeteria", "Cafeteria", clampAndResolveObstacles(Vector2D(worldWidth * 0.84f, worldHeight * 0.36f), 26f)),
+          SecretVentDef("vent_med", "Duto Enfermaria", "Enfermaria", clampAndResolveObstacles(Vector2D(worldWidth * 0.43f, worldHeight * 0.62f), 26f)),
+          SecretVentDef("vent_storage", "Duto Armazém", "Armazém", clampAndResolveObstacles(Vector2D(worldWidth * 0.16f, worldHeight * 0.86f), 26f)),
+          SecretVentDef("vent_nav", "Duto Navegação", "Navegação", clampAndResolveObstacles(Vector2D(worldWidth * 0.86f, worldHeight * 0.72f), 26f))
         )
       )
     }
@@ -586,6 +957,16 @@ class GameEngine(
           worldHeight * 0.5f + sin(angle) * ringRadius
         )
         val assignedSkin = ALL_HERO_SKINS[i % ALL_HERO_SKINS.size]
+        val botIsImp = isBotSecretMode && impostorSlot == (i + 1)
+        val botRole = when {
+          !isBotSecretMode -> SecretRole.INNOCENT
+          botIsImp -> if (secretShapeshifterEnabled) SecretRole.SHAPESHIFTER else SecretRole.IMPOSTOR
+          !secretRolesEnabled -> SecretRole.INNOCENT
+          i % 4 == 0 -> SecretRole.ENGINEER
+          i % 4 == 1 -> SecretRole.DETECTIVE
+          i % 4 == 2 -> SecretRole.MEDIC
+          else -> SecretRole.INNOCENT
+        }
         bots.add(
           BotCatState(
             id = i + 1,
@@ -597,9 +978,12 @@ class GameEngine(
             uid = "bot_${i + 1}",
             skinId = assignedSkin.id,
             isAlive = true,
-            isSecretImpostor = isBotSecretMode && impostorSlot == (i + 1),
+            isSecretImpostor = botIsImp,
             killCooldownTimer = if (isBotSecretMode) 9.5f else 0f,
-            bodyReported = false
+            bodyReported = false,
+            secretRole = botRole,
+            morphCooldownTimer = if (botIsImp) 8.0f else 0f,
+            ventCooldownTimer = 6.0f + (i % 5) * 2f
           )
         )
       }
@@ -805,6 +1189,35 @@ class GameEngine(
     if (ghostCaptureCooldownTimer > 0f) ghostCaptureCooldownTimer = max(0f, ghostCaptureCooldownTimer - safeDelta)
     if (secretKillCooldownTimer > 0f) secretKillCooldownTimer = max(0f, secretKillCooldownTimer - safeDelta)
     if (botReportCooldownTimer > 0f) botReportCooldownTimer = max(0f, botReportCooldownTimer - safeDelta)
+    if (ventCooldownTimer > 0f) ventCooldownTimer = max(0f, ventCooldownTimer - safeDelta)
+    if (morphCooldownTimer > 0f) morphCooldownTimer = max(0f, morphCooldownTimer - safeDelta)
+    if (detectiveRadarCooldownTimer > 0f) detectiveRadarCooldownTimer = max(0f, detectiveRadarCooldownTimer - safeDelta)
+    if (medicShieldCooldownTimer > 0f) medicShieldCooldownTimer = max(0f, medicShieldCooldownTimer - safeDelta)
+    if (localMedicShieldTimer > 0f) localMedicShieldTimer = max(0f, localMedicShieldTimer - safeDelta)
+
+    if (detectiveRadarTimer > 0f) {
+      detectiveRadarTimer = max(0f, detectiveRadarTimer - safeDelta)
+      if (detectiveRadarTimer <= 0f) {
+        detectiveRadarTargetPos = null
+      }
+    }
+
+    if (morphedTimer > 0f) {
+      morphedTimer -= safeDelta
+      if (morphedTimer <= 0f) {
+        revertMorph()
+      }
+    }
+
+    if (isInVent) {
+      if (!isPlayerGhost) {
+        ventRemainTimer -= safeDelta
+        if (ventRemainTimer <= 0f) {
+          toggleEnterExitVent()
+        }
+      }
+    }
+
     if (comboTimer > 0f) {
       comboTimer -= safeDelta
       if (comboTimer <= 0f) currentCombo = 0
@@ -834,16 +1247,20 @@ class GameEngine(
       }
     }
 
-    if (inputDirection.length() > 0.05f) {
-      val norm = inputDirection.normalized()
-      heroVelocity = norm * currentSpeed
-      heroAngle = (atan2(norm.y, norm.x) * 180f / PI.toFloat())
+    if (isInVent) {
+      heroVelocity = Vector2D(0f, 0f)
     } else {
-      heroVelocity = heroVelocity * 0.85f
-    }
+      if (inputDirection.length() > 0.05f) {
+        val norm = inputDirection.normalized()
+        heroVelocity = norm * currentSpeed
+        heroAngle = (atan2(norm.y, norm.x) * 180f / PI.toFloat())
+      } else {
+        heroVelocity = heroVelocity * 0.85f
+      }
 
-    val newPos = heroPosition + heroVelocity * safeDelta
-    heroPosition = clampAndResolveObstacles(newPos, 32f)
+      val newPos = heroPosition + heroVelocity * safeDelta
+      heroPosition = clampAndResolveObstacles(newPos, 32f)
+    }
 
     heroTrail.add(0, heroPosition)
     if (heroTrail.size > 400) {
@@ -1087,6 +1504,73 @@ class GameEngine(
       if (bot.killCooldownTimer > 0f) {
         bot.killCooldownTimer = max(0f, bot.killCooldownTimer - deltaTime)
       }
+      if (bot.shieldTimer > 0f) {
+        bot.shieldTimer = max(0f, bot.shieldTimer - deltaTime)
+      }
+      if (bot.ventCooldownTimer > 0f) {
+        bot.ventCooldownTimer = max(0f, bot.ventCooldownTimer - deltaTime)
+      }
+      if (bot.morphCooldownTimer > 0f) {
+        bot.morphCooldownTimer = max(0f, bot.morphCooldownTimer - deltaTime)
+      }
+      if (bot.morphedTimer > 0f) {
+        bot.morphedTimer -= deltaTime
+        if (bot.morphedTimer <= 0f) {
+          bot.morphedAsUid = null
+          bot.morphedAsName = null
+          bot.morphedAsSkinId = null
+          bot.morphedAsFurColor = null
+          spawnVentBurstParticles(bot.position, Color(0xFFC084FC))
+        }
+      }
+
+      if (bot.inVentTimer > 0f) {
+        bot.inVentTimer -= deltaTime
+        if (bot.inVentTimer <= 0f && secretVents.isNotEmpty()) {
+          val destVent = secretVents[Random.nextInt(secretVents.size)]
+          bot.position = destVent.position
+          bot.ventCooldownTimer = 16.0f + Random.nextFloat() * 10f
+          spawnVentBurstParticles(destVent.position, if (bot.isSecretImpostor) Color(0xFFEF4444) else Color(0xFF10B981))
+        }
+        continue
+      }
+
+      // Shapeshifter Impostor Bot ability: disguises as another alive bot or even the player!
+      if (isBotSecretMode && bot.secretRole == SecretRole.SHAPESHIFTER && secretShapeshifterEnabled &&
+        gameTimeSeconds >= 9f && bot.morphCooldownTimer <= 0f
+      ) {
+        val targetPool = bots.filter { it.isAlive && !it.isSecretImpostor && it.id != bot.id }
+        if (targetPool.isNotEmpty()) {
+          val chosen = targetPool[Random.nextInt(targetPool.size)]
+          bot.morphedAsUid = chosen.uid
+          bot.morphedAsName = chosen.name
+          bot.morphedAsSkinId = chosen.skinId
+          bot.morphedAsFurColor = chosen.furColor
+          bot.morphedTimer = 13.0f
+          bot.morphCooldownTimer = 26.0f
+          spawnVentBurstParticles(bot.position, Color(0xFFA855F7))
+        }
+      }
+
+      // Medic Bot ability: periodically puts shield on self or nearby alive innocent
+      if (isBotSecretMode && bot.secretRole == SecretRole.MEDIC && secretRolesEnabled &&
+        bot.shieldTimer <= 0f && Random.nextFloat() < deltaTime * 0.08f
+      ) {
+        bot.shieldTimer = 8.0f
+      }
+
+      // Vent traversal AI for Impostor & Engineer bots
+      if (isBotSecretMode && secretVentsEnabled && secretVents.isNotEmpty() &&
+        (bot.isSecretImpostor || bot.secretRole == SecretRole.ENGINEER) && bot.ventCooldownTimer <= 0f
+      ) {
+        val nearVent = secretVents.firstOrNull { (it.position - bot.position).length() < 78f }
+        if (nearVent != null && Random.nextFloat() < 0.45f) {
+          bot.inVentTimer = 1.8f
+          bot.ventCooldownTimer = 18.0f
+          spawnVentBurstParticles(nearVent.position, if (bot.isSecretImpostor) Color(0xFFEF4444) else Color(0xFF10B981))
+          continue
+        }
+      }
 
       // In Bot Secret Mode, innocent bots discovering a freshly eliminated body trigger an emergency meeting
       if (isBotSecretMode && !bot.isSecretImpostor && botReportCooldownTimer <= 0f && pendingBotMeetingCaller == null) {
@@ -1120,10 +1604,10 @@ class GameEngine(
       var huntTargetIsHero = false
       if (isBotSecretMode && bot.isSecretImpostor && gameTimeSeconds >= 10f && bot.killCooldownTimer <= 0f) {
         val victimBot = bots
-          .filter { it.isAlive && !it.isSecretImpostor && it.id != bot.id }
+          .filter { it.isAlive && !it.isSecretImpostor && it.id != bot.id && it.inVentTimer <= 0f }
           .minByOrNull { (it.position - bot.position).length() }
         val botVictimDist = victimBot?.let { (it.position - bot.position).length() } ?: 99999f
-        val heroEligible = !botSecretLocalIsImpostor && localPlayerAlive && !isEffectivelyGodMode && !isEffectivelyInvisible
+        val heroEligible = !botSecretLocalIsImpostor && localPlayerAlive && !isInVent && !isEffectivelyGodMode && !isEffectivelyInvisible
         val heroDist = if (heroEligible) (heroPosition - bot.position).length() else 99999f
 
         if (heroEligible && heroDist <= botVictimDist && heroDist < 720f) {
@@ -1159,10 +1643,27 @@ class GameEngine(
 
       // Execute kill if Impostor Bot caught victim
       if (isBotSecretMode && bot.isSecretImpostor && gameTimeSeconds >= 10f && bot.killCooldownTimer <= 0f && status == GameStatus.PLAYING) {
-        if (huntTargetIsHero && (heroPosition - bot.position).length() < 64f) {
+        if (huntTargetIsHero && !isInVent && (heroPosition - bot.position).length() < 64f) {
+          if (localMedicShieldTimer > 0f || shieldActive) {
+            if (localMedicShieldTimer > 0f) localMedicShieldTimer = 0f else shieldActive = false
+            bot.killCooldownTimer = 7.5f
+            isInvincible = true
+            invincibilityTimer = 2.0f
+            spawnVentBurstParticles(heroPosition, Color(0xFF22D3EE))
+            addFloatingTextSafe(
+              FloatingText(
+                text = "🩺 Escudo Médico bloqueou o ataque!",
+                position = heroPosition + Vector2D(0f, -55f),
+                color = Color(0xFF22D3EE)
+              )
+            )
+            audio?.playPowerUpSound()
+            continue
+          }
           bot.killCooldownTimer = 12.0f
           localPlayerAlive = false
           isSpectating = true
+          isInVent = false
           lives = 0
           audio?.playGhostHitSound()
           audio?.vibrateGhostHit()
@@ -1193,6 +1694,12 @@ class GameEngine(
             break
           }
         } else if (huntTargetBot != null && (huntTargetBot.position - bot.position).length() < 68f) {
+          if (huntTargetBot.shieldTimer > 0f) {
+            huntTargetBot.shieldTimer = 0f
+            bot.killCooldownTimer = 7.0f
+            spawnVentBurstParticles(huntTargetBot.position, Color(0xFF22D3EE))
+            continue
+          }
           bot.killCooldownTimer = 11.5f
           huntTargetBot.isAlive = false
           huntTargetBot.bodyReported = false

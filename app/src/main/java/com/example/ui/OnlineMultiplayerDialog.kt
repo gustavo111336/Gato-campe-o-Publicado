@@ -34,6 +34,7 @@ import com.example.data.RoomPlayer
 import com.example.data.SharedSkinPost
 import com.example.data.UserProfile
 import com.example.model.ALL_HERO_SKINS
+import com.example.model.SecretRolePreference
 import com.google.firebase.auth.FirebaseUser
 
 enum class OnlineLobbyTab(val label: String) {
@@ -47,7 +48,12 @@ enum class OnlineLobbyTab(val label: String) {
 data class MultiplayerBotLaunchConfig(
   val playWithBots: Boolean = false,
   val botCount: Int = 3,
-  val secretModeWithBots: Boolean = false
+  val secretModeWithBots: Boolean = false,
+  val tasksEnabled: Boolean = true,
+  val rolesEnabled: Boolean = true,
+  val shapeshifterEnabled: Boolean = true,
+  val ventsEnabled: Boolean = true,
+  val rolePreference: SecretRolePreference = SecretRolePreference.RANDOM
 )
 
 @Composable
@@ -1097,6 +1103,11 @@ private fun ActiveRoomCard(
   var playWithBots by remember(room.code) { mutableStateOf(initialPlayWithBots) }
   var botCount by remember(room.code) { mutableIntStateOf(initialBotCount.coerceIn(1, 20)) }
   var botsSecretMode by remember(room.code) { mutableStateOf(initialBotsSecretMode) }
+  var botsRolesEnabled by remember(room.code) { mutableStateOf(true) }
+  var botsShapeshifterEnabled by remember(room.code) { mutableStateOf(true) }
+  var botsVentsEnabled by remember(room.code) { mutableStateOf(true) }
+  var botsTasksEnabled by remember(room.code) { mutableStateOf(true) }
+  var botsRolePref by remember(room.code) { mutableStateOf(SecretRolePreference.RANDOM) }
 
   LaunchedEffect(isSoloInRoom) {
     if (!isSoloInRoom && playWithBots) {
@@ -1332,6 +1343,185 @@ private fun ActiveRoomCard(
                     )
                   }
                 }
+
+                if (botsSecretMode) {
+                  Spacer(modifier = Modifier.height(6.dp))
+                  // Funções para Jogadores
+                  Surface(
+                    onClick = { botsRolesEnabled = !botsRolesEnabled },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (botsRolesEnabled) Color(0xFF3B0764) else Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, if (botsRolesEnabled) Color(0xFFA855F7) else Color(0xFF475569)),
+                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                          text = "✨ Funções para Jogadores",
+                          fontSize = 11.sp,
+                          fontWeight = FontWeight.Black,
+                          color = if (botsRolesEnabled) Color(0xFFE9D5FF) else Color.White
+                        )
+                        Text(
+                          text = "Engenheiro (Dutos), Detetive (Radar), Médico (Escudo) e Impostor.",
+                          fontSize = 10.sp,
+                          color = Color(0xFFCBD5E1)
+                        )
+                      }
+                      Switch(
+                        checked = botsRolesEnabled,
+                        onCheckedChange = { botsRolesEnabled = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFA855F7))
+                      )
+                    }
+                  }
+
+                  if (botsRolesEnabled) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // Impostor Metamorfo
+                    Surface(
+                      onClick = {
+                        botsShapeshifterEnabled = !botsShapeshifterEnabled
+                        if (!botsShapeshifterEnabled && botsRolePref == SecretRolePreference.SHAPESHIFTER) {
+                          botsRolePref = SecretRolePreference.RANDOM
+                        }
+                      },
+                      shape = RoundedCornerShape(10.dp),
+                      color = if (botsShapeshifterEnabled) Color(0xFF581C87) else Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, if (botsShapeshifterEnabled) Color(0xFFE879F9) else Color(0xFF475569)),
+                      modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                      ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                          Text(
+                            text = "🎭 Impostor Metamorfo",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (botsShapeshifterEnabled) Color(0xFFF5D0FE) else Color.White
+                          )
+                          Text(
+                            text = "Impostor se transforma em qualquer jogador vivo para incriminar!",
+                            fontSize = 10.sp,
+                            color = Color(0xFFCBD5E1)
+                          )
+                        }
+                        Switch(
+                          checked = botsShapeshifterEnabled,
+                          onCheckedChange = {
+                            botsShapeshifterEnabled = it
+                            if (!it && botsRolePref == SecretRolePreference.SHAPESHIFTER) {
+                              botsRolePref = SecretRolePreference.RANDOM
+                            }
+                          },
+                          colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFD946EF))
+                        )
+                      }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                      text = "🎯 Sua Função na Partida:",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFFFDE047)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                      SecretRolePreference.entries.forEach { pref ->
+                        if (pref == SecretRolePreference.SHAPESHIFTER && !botsShapeshifterEnabled) return@forEach
+                        FilterChip(
+                          selected = botsRolePref == pref,
+                          onClick = { botsRolePref = pref },
+                          label = { Text("${pref.emoji} ${pref.label}", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                          modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        )
+                      }
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(6.dp))
+                  // Dutos no Mapa
+                  Surface(
+                    onClick = { botsVentsEnabled = !botsVentsEnabled },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (botsVentsEnabled) Color(0xFF134E4A) else Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, if (botsVentsEnabled) Color(0xFF14B8A6) else Color(0xFF475569)),
+                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                          text = "🕳️ Dutos no Mapa (Vents)",
+                          fontSize = 11.sp,
+                          fontWeight = FontWeight.Black,
+                          color = if (botsVentsEnabled) Color(0xFF99F6E4) else Color.White
+                        )
+                        Text(
+                          text = "5 dutos interligados para Impostor e Engenheiro viajarem.",
+                          fontSize = 10.sp,
+                          color = Color(0xFFCBD5E1)
+                        )
+                      }
+                      Switch(
+                        checked = botsVentsEnabled,
+                        onCheckedChange = { botsVentsEnabled = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF14B8A6))
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(6.dp))
+                  // Tarefas da Nave
+                  Surface(
+                    onClick = { botsTasksEnabled = !botsTasksEnabled },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (botsTasksEnabled) Color(0xFF064E3B) else Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, if (botsTasksEnabled) Color(0xFF10B981) else Color(0xFF475569)),
+                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                          text = "📋 Tarefas da Nave (Tasks)",
+                          fontSize = 11.sp,
+                          fontWeight = FontWeight.Black,
+                          color = if (botsTasksEnabled) Color(0xFFA7F3D0) else Color.White
+                        )
+                        Text(
+                          text = "Mini-jogos + Modo Espectador se você for eliminado.",
+                          fontSize = 10.sp,
+                          color = Color(0xFFCBD5E1)
+                        )
+                      }
+                      Switch(
+                        checked = botsTasksEnabled,
+                        onCheckedChange = { botsTasksEnabled = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF10B981))
+                      )
+                    }
+                  }
+                }
               } else {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -1362,7 +1552,12 @@ private fun ActiveRoomCard(
             MultiplayerBotLaunchConfig(
               playWithBots = effectiveBotsLaunch,
               botCount = botCount,
-              secretModeWithBots = effectiveBotsSecret
+              secretModeWithBots = effectiveBotsSecret,
+              tasksEnabled = effectiveBotsSecret && botsTasksEnabled,
+              rolesEnabled = effectiveBotsSecret && botsRolesEnabled,
+              shapeshifterEnabled = effectiveBotsSecret && botsRolesEnabled && botsShapeshifterEnabled,
+              ventsEnabled = effectiveBotsSecret && botsVentsEnabled,
+              rolePreference = if (effectiveBotsSecret) botsRolePref else SecretRolePreference.RANDOM
             )
           )
         },

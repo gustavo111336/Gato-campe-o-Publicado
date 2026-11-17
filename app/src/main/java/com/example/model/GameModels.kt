@@ -289,5 +289,16 @@ data class BotCatState(
   var isAlive: Boolean = true,
   var isSecretImpostor: Boolean = false,
   var killCooldownTimer: Float = 0f,
-  var bodyReported: Boolean = false
+  var bodyReported: Boolean = false,
+  var secretRole: SecretRole = SecretRole.INNOCENT,
+  var shieldTimer: Float = 0f,
+  var morphedAsUid: String? = null,
+  var morphedAsName: String? = null,
+  var morphedAsSkinId: String? = null,
+  var morphedAsFurColor: Color? = null,
+  var morphedTimer: Float = 0f,
+  var morphCooldownTimer: Float = 0f,
+  var inVentTimer: Float = 0f,
+  var ventCooldownTimer: Float = 0f
 )
+

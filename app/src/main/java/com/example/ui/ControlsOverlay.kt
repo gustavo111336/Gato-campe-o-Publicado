@@ -51,6 +51,11 @@ fun ControlsOverlay(
   onSecretKill: () -> Unit = {},
   onOpenTask: (com.example.model.SecretTaskStationDef) -> Unit = {},
   onLeaveSpectator: () -> Unit = {},
+  onToggleVent: () -> Unit = {},
+  onHopVent: (Int) -> Unit = {},
+  onOpenMorphPicker: () -> Unit = {},
+  onTriggerDetectiveRadar: () -> Unit = {},
+  onTriggerMedicShield: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   Box(modifier = modifier.fillMaxSize().padding(14.dp)) {
@@ -71,6 +76,11 @@ fun ControlsOverlay(
       if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled) {
         Spacer(modifier = Modifier.height(6.dp))
         SecretTasksProgressBar(percent = uiState.teamTasksCompletedPercent)
+      }
+
+      if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.isLocalPlayerAlive && !uiState.isSpectating) {
+        Spacer(modifier = Modifier.height(5.dp))
+        SecretRoleBadge(uiState = uiState)
       }
 
       if (uiState.isSpectating) {
@@ -140,7 +150,7 @@ fun ControlsOverlay(
           }
         }
 
-        // Right Side: Multiplayer Actions (Denunciar / Matar) + Action Skills (Sonic Wave + Turbo Dash)
+        // Right Side: Multiplayer Actions (Denunciar / Matar) + Role Skills (Dutos, Metamorfo, Radar, Escudo) + Turbo Dash
         Column(
           modifier = Modifier.align(Alignment.BottomEnd),
           horizontalAlignment = Alignment.End,
@@ -152,7 +162,7 @@ fun ControlsOverlay(
               verticalAlignment = Alignment.CenterVertically
             ) {
               if (uiState.isSecretMode && (uiState.multiplayerRole == "ghost" || uiState.isPlayerGhost)) {
-                val killReady = uiState.secretKillCooldownRatio <= 0.01f && uiState.nearestKillTargetUid != null
+                val killReady = uiState.secretKillCooldownRatio <= 0.01f && uiState.nearestKillTargetUid != null && !uiState.isInVent
                 val killLabel = when {
                   uiState.secretKillCooldownRatio > 0.01f -> String.format("⏳ %.1fs", uiState.secretKillCooldownSec)
                   uiState.nearestKillTargetName != null -> "🗡️ Matar @${uiState.nearestKillTargetName?.take(8)}"
@@ -199,7 +209,127 @@ fun ControlsOverlay(
             }
           }
 
-          if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled && !uiState.isPlayerGhost) {
+          // Secret Role Powers Row (Metamorfo / Radar / Escudo / Duto)
+          if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.isLocalPlayerAlive) {
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              // Shapeshifter Button
+              if (uiState.localSecretRole == com.example.model.SecretRole.SHAPESHIFTER &&
+                uiState.secretShapeshifterEnabled && !uiState.isInVent
+              ) {
+                val morphReady = uiState.morphCooldownSec <= 0.05f
+                val morphLabel = when {
+                  uiState.morphedTargetName != null -> "🎭 ${uiState.morphedTargetName?.take(7)} (${uiState.morphedTimeSec.toInt()}s)"
+                  !morphReady -> String.format("🎭 %.0fs", uiState.morphCooldownSec)
+                  else -> "🎭 Metamorfose"
+                }
+                Button(
+                  onClick = onOpenMorphPicker,
+                  enabled = morphReady || uiState.morphedTargetName != null,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF9333EA),
+                    disabledContainerColor = Color(0xFF475569)
+                  ),
+                  shape = RoundedCornerShape(16.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("secret_morph_button")
+                ) {
+                  Text(
+                    text = morphLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                  )
+                }
+              }
+
+              // Detective Radar Button
+              if (uiState.localSecretRole == com.example.model.SecretRole.DETECTIVE) {
+                val radarReady = uiState.detectiveRadarCooldownSec <= 0.05f
+                Button(
+                  onClick = onTriggerDetectiveRadar,
+                  enabled = radarReady,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFD97706),
+                    disabledContainerColor = Color(0xFF475569)
+                  ),
+                  shape = RoundedCornerShape(16.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("secret_detective_button")
+                ) {
+                  Text(
+                    text = if (radarReady) "🔍 Radar" else String.format("🔍 %.0fs", uiState.detectiveRadarCooldownSec),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                  )
+                }
+              }
+
+              // Medic Shield Button
+              if (uiState.localSecretRole == com.example.model.SecretRole.MEDIC) {
+                val shieldReady = uiState.medicShieldCooldownSec <= 0.05f
+                Button(
+                  onClick = onTriggerMedicShield,
+                  enabled = shieldReady,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF0891B2),
+                    disabledContainerColor = Color(0xFF475569)
+                  ),
+                  shape = RoundedCornerShape(16.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("secret_medic_button")
+                ) {
+                  Text(
+                    text = if (shieldReady) "🩺 Escudo" else String.format("🩺 %.0fs", uiState.medicShieldCooldownSec),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                  )
+                }
+              }
+
+              // Vent Button (Engineer + Impostor)
+              if (uiState.canUseVents && !uiState.isInVent && (uiState.nearestVent != null || uiState.ventCooldownSec > 0f)) {
+                val ventReady = uiState.nearestVent != null && uiState.ventCooldownSec <= 0.05f
+                val ventLabel = when {
+                  uiState.ventCooldownSec > 0.05f -> String.format("🕳️ %.0fs", uiState.ventCooldownSec)
+                  uiState.nearestVent != null -> "🕳️ Duto (${uiState.nearestVent.roomName})"
+                  else -> "🕳️ Duto"
+                }
+                Button(
+                  onClick = onToggleVent,
+                  enabled = ventReady,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF0D9488),
+                    disabledContainerColor = Color(0xFF475569)
+                  ),
+                  shape = RoundedCornerShape(16.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("secret_vent_button")
+                ) {
+                  Text(
+                    text = ventLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                  )
+                }
+              }
+            }
+          }
+
+          if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled && !uiState.isPlayerGhost && !uiState.isInVent) {
             val station = uiState.nearestTaskStation
             if (station != null) {
               val isDone = station.isCompletedByPlayer
@@ -245,6 +375,20 @@ fun ControlsOverlay(
             )
           }
         }
+      }
+
+      if (uiState.isInVent) {
+        VentNavigationOverlay(
+          roomName = uiState.currentVentRoomName ?: "Duto",
+          isEngineer = !uiState.isPlayerGhost,
+          remainSec = uiState.ventRemainSec,
+          onPrevVent = { onHopVent(-1) },
+          onNextVent = { onHopVent(1) },
+          onExitVent = onToggleVent,
+          modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 148.dp)
+        )
       }
     }
   }
@@ -1131,4 +1275,118 @@ fun SpectatorBanner(
     }
   }
 }
+
+@Composable
+fun SecretRoleBadge(
+  uiState: GameUiState,
+  modifier: Modifier = Modifier
+) {
+  val role = uiState.localSecretRole
+  val accentColor = Color(role.badgeColorHex)
+  Surface(
+    color = Color(0xEE0F172A),
+    shape = RoundedCornerShape(12.dp),
+    border = androidx.compose.foundation.BorderStroke(1.5.dp, accentColor),
+    shadowElevation = 4.dp,
+    modifier = modifier.fillMaxWidth(0.92f)
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+        Text(role.emoji, fontSize = 15.sp)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "${role.title}: ${role.summary}",
+          color = Color.White,
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1
+        )
+      }
+      if (uiState.morphedTargetName != null) {
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "🎭 @${uiState.morphedTargetName?.take(7)} (${uiState.morphedTimeSec.toInt()}s)",
+          color = Color(0xFFE879F9),
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Black
+        )
+      } else if (uiState.localMedicShieldSec > 0f) {
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "🩺 Escudo ${uiState.localMedicShieldSec.toInt()}s",
+          color = Color(0xFF22D3EE),
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Black
+        )
+      }
+    }
+  }
+}
+
+@Composable
+fun VentNavigationOverlay(
+  roomName: String,
+  isEngineer: Boolean,
+  remainSec: Float,
+  onPrevVent: () -> Unit,
+  onNextVent: () -> Unit,
+  onExitVent: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Surface(
+    color = Color(0xF00F172A),
+    shape = RoundedCornerShape(18.dp),
+    border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF14B8A6)),
+    shadowElevation = 10.dp,
+    modifier = modifier.fillMaxWidth(0.94f)
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+      horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+      Text(
+        text = if (isEngineer) "🕳️ DENTRO DO DUTO: $roomName (${remainSec.toInt()}s)" else "🕳️ DENTRO DO DUTO: $roomName",
+        color = Color(0xFF5EEAD4),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Black
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Button(
+          onClick = onPrevVent,
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp).testTag("vent_prev_button")
+        ) {
+          Text("⬅️ Anterior", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+        }
+        Button(
+          onClick = onExitVent,
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp).testTag("vent_exit_button")
+        ) {
+          Text("🚪 Sair", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+        }
+        Button(
+          onClick = onNextVent,
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp).testTag("vent_next_button")
+        ) {
+          Text("Próximo ➡️", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+        }
+      }
+    }
+  }
+}
+
 

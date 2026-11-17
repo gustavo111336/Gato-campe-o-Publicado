@@ -372,6 +372,21 @@ class MainActivity : ComponentActivity() {
               },
               onLeaveSpectator = {
                 viewModel.leaveSpectatorMatch()
+              },
+              onToggleVent = {
+                viewModel.toggleEnterExitVent()
+              },
+              onHopVent = { dir ->
+                viewModel.hopToVent(dir)
+              },
+              onOpenMorphPicker = {
+                viewModel.openMorphPickerDialog(true)
+              },
+              onTriggerDetectiveRadar = {
+                viewModel.triggerDetectiveRadar()
+              },
+              onTriggerMedicShield = {
+                viewModel.triggerMedicShield()
               }
             )
 
@@ -382,11 +397,15 @@ class MainActivity : ComponentActivity() {
                 onStartNormal = { viewModel.startNormalGame() },
                 onStartEndless = { viewModel.startEndlessGame() },
                 onStartBots = { viewModel.startBotsGame() },
-                onStartCustomBots = { count, secret, tasks ->
+                onStartCustomBots = { count, secret, tasks, roles, shapeshifter, vents, rolePref ->
                   viewModel.startCustomBotsGame(
                     botCount = count,
                     secretMode = secret,
                     tasksEnabled = tasks,
+                    rolesEnabled = roles,
+                    shapeshifterEnabled = shapeshifter,
+                    ventsEnabled = vents,
+                    rolePreference = rolePref,
                     localUsername = onlineVm?.suggestedUsername().orEmpty().ifBlank { "Você" }
                   )
                 },
@@ -593,6 +612,11 @@ class MainActivity : ComponentActivity() {
                     viewModel.startMultiplayerBotsGame(
                       botCount = botCfg.botCount,
                       secretMode = botCfg.secretModeWithBots,
+                      tasksEnabled = botCfg.tasksEnabled,
+                      rolesEnabled = botCfg.rolesEnabled,
+                      shapeshifterEnabled = botCfg.shapeshifterEnabled,
+                      ventsEnabled = botCfg.ventsEnabled,
+                      rolePreference = botCfg.rolePreference,
                       localUsername = onlineVm?.suggestedUsername().orEmpty().ifBlank { "Você" },
                       roomCode = activeRoomState?.code.orEmpty()
                     )
@@ -667,6 +691,22 @@ class MainActivity : ComponentActivity() {
                 },
                 onDismiss = {
                   viewModel.dismissTaskStationDialog()
+                }
+              )
+            }
+
+            if (uiState.showMorphPickerDialog) {
+              SecretMorphPickerDialog(
+                candidates = uiState.morphCandidates,
+                currentMorphedName = uiState.morphedTargetName,
+                onSelectTarget = { uid ->
+                  viewModel.activateMorph(uid)
+                },
+                onRevertMorph = {
+                  viewModel.revertMorph()
+                },
+                onDismiss = {
+                  viewModel.openMorphPickerDialog(false)
                 }
               )
             }

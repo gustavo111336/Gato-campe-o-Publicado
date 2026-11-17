@@ -36,6 +36,7 @@ import com.example.model.ALL_40_ITEMS
 import com.example.model.ALL_40_MODES
 import com.example.model.ALL_HERO_SKINS
 import com.example.model.Difficulty
+import com.example.model.SecretRolePreference
 
 @Composable
 fun ReadyStartScreen(
@@ -43,7 +44,15 @@ fun ReadyStartScreen(
   onStartNormal: () -> Unit,
   onStartEndless: () -> Unit,
   onStartBots: () -> Unit,
-  onStartCustomBots: (botCount: Int, secretMode: Boolean, tasksEnabled: Boolean) -> Unit = { _, _, _ -> onStartBots() },
+  onStartCustomBots: (
+    botCount: Int,
+    secretMode: Boolean,
+    tasksEnabled: Boolean,
+    rolesEnabled: Boolean,
+    shapeshifterEnabled: Boolean,
+    ventsEnabled: Boolean,
+    rolePreference: SecretRolePreference
+  ) -> Unit = { _, _, _, _, _, _, _ -> onStartBots() },
   onDifficultyChange: (Difficulty) -> Unit,
   onOpenModes: () -> Unit,
   onOpenCreator: () -> Unit,
@@ -837,9 +846,9 @@ fun ReadyStartScreen(
 
     if (showBotsConfigDialog) {
       MenuBotsSetupDialog(
-        onStart = { count, secret, tasks ->
+        onStart = { count, secret, tasks, roles, shapeshifter, vents, rolePref ->
           showBotsConfigDialog = false
-          onStartCustomBots(count, secret, tasks)
+          onStartCustomBots(count, secret, tasks, roles, shapeshifter, vents, rolePref)
         },
         onDismiss = { showBotsConfigDialog = false }
       )
@@ -849,12 +858,24 @@ fun ReadyStartScreen(
 
 @Composable
 private fun MenuBotsSetupDialog(
-  onStart: (botCount: Int, secretMode: Boolean, tasksEnabled: Boolean) -> Unit,
+  onStart: (
+    botCount: Int,
+    secretMode: Boolean,
+    tasksEnabled: Boolean,
+    rolesEnabled: Boolean,
+    shapeshifterEnabled: Boolean,
+    ventsEnabled: Boolean,
+    rolePreference: SecretRolePreference
+  ) -> Unit,
   onDismiss: () -> Unit
 ) {
   var botCount by remember { mutableIntStateOf(20) }
   var secretMode by remember { mutableStateOf(false) }
   var tasksEnabled by remember { mutableStateOf(true) }
+  var rolesEnabled by remember { mutableStateOf(true) }
+  var shapeshifterEnabled by remember { mutableStateOf(true) }
+  var ventsEnabled by remember { mutableStateOf(true) }
+  var rolePreference by remember { mutableStateOf(SecretRolePreference.RANDOM) }
 
   Dialog(onDismissRequest = onDismiss) {
     Card(
@@ -863,9 +884,14 @@ private fun MenuBotsSetupDialog(
       border = BorderStroke(2.dp, Color(0xFF2DD4BF)),
       modifier = Modifier
         .fillMaxWidth()
+        .heightIn(max = 650.dp)
         .testTag("menu_bots_setup_dialog")
     ) {
-      Column(modifier = Modifier.padding(16.dp)) {
+      Column(
+        modifier = Modifier
+          .padding(16.dp)
+          .verticalScroll(rememberScrollState())
+      ) {
         Text(
           text = "🤖 Configurar Modo Bots",
           fontSize = 18.sp,
@@ -873,10 +899,10 @@ private fun MenuBotsSetupDialog(
           color = Color(0xFF2DD4BF)
         )
         Text(
-          text = "Defina a quantidade de bots para jogar. Com mais de 2 bots, você também pode ativar o Modo Secreto!",
+          text = "Defina a quantidade de bots para jogar. Com mais de 2 bots, ative o Modo Secreto com Funções, Metamorfo e Dutos!",
           fontSize = 11.sp,
           color = Color(0xFFCBD5E1),
-          modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+          modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
         )
 
         Text(
@@ -996,47 +1022,93 @@ private fun MenuBotsSetupDialog(
 
           if (secretMode) {
             Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-              onClick = { tasksEnabled = !tasksEnabled },
-              shape = RoundedCornerShape(12.dp),
-              color = if (tasksEnabled) Color(0xFF064E3B) else Color(0xFF1E293B),
-              border = BorderStroke(
-                width = if (tasksEnabled) 1.5.dp else 1.dp,
-                color = if (tasksEnabled) Color(0xFF10B981) else Color(0xFF475569)
-              ),
-              modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 48.dp)
-                .testTag("menu_bots_tasks_toggle")
-            ) {
+            Text(
+              text = "🎛️ Seletor do Modo Secreto (Funções & Dutos):",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Black,
+              color = Color(0xFFE879F9)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Switch: Funções para Jogadores (Engenheiro, Detetive, Médico)
+            SecretOptionSwitchCard(
+              title = "✨ Funções para Jogadores",
+              subtitle = "Ativa Engenheiro (Dutos), Detetive (Radar) e Médico (Escudo) para a tripulação!",
+              checked = rolesEnabled,
+              accentColor = Color(0xFF38BDF8),
+              bgActiveColor = Color(0xFF0C4A6E),
+              testTag = "menu_bots_roles_toggle",
+              onToggle = { rolesEnabled = it }
+            )
+
+            if (rolesEnabled) {
+              Spacer(modifier = Modifier.height(6.dp))
+              // Switch: Impostor Metamorfo
+              SecretOptionSwitchCard(
+                title = "🎭 Impostor Metamorfo",
+                subtitle = "O Impostor pode se transformar em qualquer jogador vivo para incriminar os outros!",
+                checked = shapeshifterEnabled,
+                accentColor = Color(0xFFA855F7),
+                bgActiveColor = Color(0xFF4C1D95),
+                testTag = "menu_bots_shapeshifter_toggle",
+                onToggle = { shapeshifterEnabled = it }
+              )
+
+              Spacer(modifier = Modifier.height(8.dp))
+              Text(
+                text = "🎯 Sua Função na Partida:",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFDE047)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
               Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
               ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                  Text(
-                    text = "📋 Tarefas da Nave (Tasks)",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    color = if (tasksEnabled) Color(0xFF6EE7B7) else Color.White
-                  )
-                  Text(
-                    text = "Mini-jogos nas salas (Fios, Leite, etc). Se morrer, você fica espectando e ainda ajuda!",
-                    fontSize = 10.sp,
-                    color = Color(0xFFCBD5E1)
+                SecretRolePreference.entries.forEach { pref ->
+                  if (pref == SecretRolePreference.SHAPESHIFTER && !shapeshifterEnabled) return@forEach
+                  FilterChip(
+                    selected = rolePreference == pref,
+                    onClick = { rolePreference = pref },
+                    label = {
+                      Text(
+                        text = "${pref.emoji} ${pref.label}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                      )
+                    },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                   )
                 }
-                Switch(
-                  checked = tasksEnabled,
-                  onCheckedChange = { tasksEnabled = it },
-                  colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF10B981)
-                  )
-                )
               }
             }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            // Switch: Dutos (Vents)
+            SecretOptionSwitchCard(
+              title = "🕳️ Dutos no Mapa (Vents)",
+              subtitle = "5 dutos interligados pelo mapa para o Impostor e o Engenheiro se esconderem e viajarem!",
+              checked = ventsEnabled,
+              accentColor = Color(0xFF14B8A6),
+              bgActiveColor = Color(0xFF134E4A),
+              testTag = "menu_bots_vents_toggle",
+              onToggle = { ventsEnabled = it }
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+            // Switch: Tarefas da Nave
+            SecretOptionSwitchCard(
+              title = "📋 Tarefas da Nave (Tasks)",
+              subtitle = "Mini-jogos nas salas (Fios, Leite, etc). Se morrer, você fica espectando e ainda ajuda!",
+              checked = tasksEnabled,
+              accentColor = Color(0xFF10B981),
+              bgActiveColor = Color(0xFF064E3B),
+              testTag = "menu_bots_tasks_toggle",
+              onToggle = { tasksEnabled = it }
+            )
           }
         } else {
           Spacer(modifier = Modifier.height(8.dp))
@@ -1051,8 +1123,21 @@ private fun MenuBotsSetupDialog(
 
         val effectiveSecret = botCount > 2 && secretMode
         val effectiveTasks = effectiveSecret && tasksEnabled
+        val effectiveRoles = effectiveSecret && rolesEnabled
+        val effectiveShapeshifter = effectiveRoles && shapeshifterEnabled
+        val effectiveVents = effectiveSecret && ventsEnabled
         Button(
-          onClick = { onStart(botCount, effectiveSecret, effectiveTasks) },
+          onClick = {
+            onStart(
+              botCount,
+              effectiveSecret,
+              effectiveTasks,
+              effectiveRoles,
+              effectiveShapeshifter,
+              effectiveVents,
+              rolePreference
+            )
+          },
           colors = ButtonDefaults.buttonColors(
             containerColor = if (effectiveSecret) Color(0xFFDC2626) else Color(0xFF059669)
           ),
@@ -1081,6 +1166,59 @@ private fun MenuBotsSetupDialog(
           Text("Cancelar", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun SecretOptionSwitchCard(
+  title: String,
+  subtitle: String,
+  checked: Boolean,
+  accentColor: Color,
+  bgActiveColor: Color,
+  testTag: String,
+  onToggle: (Boolean) -> Unit
+) {
+  Surface(
+    onClick = { onToggle(!checked) },
+    shape = RoundedCornerShape(12.dp),
+    color = if (checked) bgActiveColor else Color(0xFF1E293B),
+    border = BorderStroke(
+      width = if (checked) 1.5.dp else 1.dp,
+      color = if (checked) accentColor else Color(0xFF475569)
+    ),
+    modifier = Modifier
+      .fillMaxWidth()
+      .defaultMinSize(minHeight = 48.dp)
+      .testTag(testTag)
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+        Text(
+          text = title,
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Black,
+          color = if (checked) Color.White else Color(0xFFCBD5E1)
+        )
+        Text(
+          text = subtitle,
+          fontSize = 10.sp,
+          color = Color(0xFFCBD5E1)
+        )
+      }
+      Switch(
+        checked = checked,
+        onCheckedChange = onToggle,
+        colors = SwitchDefaults.colors(
+          checkedThumbColor = Color.White,
+          checkedTrackColor = accentColor
+        )
+      )
     }
   }
 }
