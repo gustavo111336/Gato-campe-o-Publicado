@@ -207,6 +207,19 @@ fun GameCanvas(
           drawObstacle(obs, frameTime, is3d)
         }
 
+        if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled) {
+          val taskStationsSnapshot = engine.snapshotSecretTaskStations()
+          for (station in taskStationsSnapshot) {
+            drawSecretTaskStation(
+              station = station,
+              gameTime = frameTime,
+              textPaint = textPaint,
+              itemEmojiPaint = itemEmojiPaint,
+              is3d = is3d
+            )
+          }
+        }
+
         for (sw in shockwavesSnapshot) {
           val r = max(1f, sw.radius)
           drawCircle(
@@ -316,12 +329,27 @@ fun GameCanvas(
               style = Stroke(width = 3f)
             )
           }
+
+          if (uiState.isSpectating) {
+            drawCircle(
+              color = Color(0xFFFDE047).copy(alpha = 0.35f + sin(frameTime * 6f) * 0.12f),
+              radius = 36f,
+              center = Offset(heroPos.x, heroPos.y - if (is3d) 10f else 0f)
+            )
+            drawOval(
+              color = Color(0xFFFDE047),
+              topLeft = Offset(heroPos.x - 14f, heroPos.y - 42f - if (is3d) 10f else 0f),
+              size = Size(28f, 10f),
+              style = Stroke(width = 2.5f)
+            )
+          }
+
           drawHeroCat(
             pos = heroPos,
             angle = engine.heroAngle,
             skin = activeSkin,
             isInvincible = engine.isInvincible,
-            isInvisible = engine.isEffectivelyInvisible || !uiState.isLocalPlayerAlive,
+            isInvisible = engine.isEffectivelyInvisible || (!uiState.isLocalPlayerAlive && !uiState.isSpectating),
             hasShield = engine.shieldActive,
             hasCatnip = engine.catnipTimer > 0f,
             hasMagnet = engine.magnetTimer > 0f || engine.giantMagnetTimer > 0f,
@@ -330,6 +358,21 @@ fun GameCanvas(
             is3d = is3d,
             gameTime = frameTime
           )
+
+          if (uiState.isSpectating) {
+            val savedColor = textPaint.color
+            val savedSize = textPaint.textSize
+            textPaint.color = android.graphics.Color.YELLOW
+            textPaint.textSize = 20f
+            drawContext.canvas.nativeCanvas.drawText(
+              "👻 ESPECTADOR",
+              heroPos.x,
+              heroPos.y - 48f,
+              textPaint
+            )
+            textPaint.color = savedColor
+            textPaint.textSize = savedSize
+          }
         }
 
         for (g in ghostsSnapshot) {
@@ -1301,3 +1344,79 @@ private fun DrawScope.drawCatTrackerCompass(
     drawPath(arrowPath, color = Color.White)
   }
 }
+
+private fun DrawScope.drawSecretTaskStation(
+  station: com.example.model.SecretTaskStationDef,
+  gameTime: Float,
+  textPaint: Paint,
+  itemEmojiPaint: Paint,
+  is3d: Boolean
+) {
+  val pos = station.position
+  val isDone = station.isCompletedByPlayer
+  val baseColor = if (isDone) Color(0xFF10B981) else Color(0xFF0EA5E9)
+  val pulse = if (isDone) 0f else sin(gameTime * 4f + station.position.x * 0.01f) * 4f
+
+  if (is3d) {
+    drawOval(
+      color = Color.Black.copy(alpha = 0.35f),
+      topLeft = Offset(pos.x - 28f, pos.y + 10f),
+      size = Size(56f, 22f)
+    )
+  }
+
+  // Glowing floor boundary / terminal ring
+  drawCircle(
+    color = baseColor.copy(alpha = if (isDone) 0.25f else 0.40f),
+    radius = 32f + pulse,
+    center = Offset(pos.x, pos.y),
+    style = Stroke(width = if (isDone) 2.5f else 3.5f)
+  )
+
+  // Metallic terminal console base
+  drawCircle(
+    color = Color(0xFF1E293B),
+    radius = 22f,
+    center = Offset(pos.x, pos.y)
+  )
+  drawCircle(
+    color = baseColor,
+    radius = 22f,
+    center = Offset(pos.x, pos.y),
+    style = Stroke(width = 2.5f)
+  )
+
+  // Floating Screen / Top indicator
+  drawCircle(
+    color = if (isDone) Color(0xFF065F46) else Color(0xFF0369A1),
+    radius = 16f,
+    center = Offset(pos.x, pos.y)
+  )
+
+  // Emoji terminal icon
+  val savedSize = itemEmojiPaint.textSize
+  itemEmojiPaint.textSize = 22f
+  drawContext.canvas.nativeCanvas.drawText(
+    station.emoji,
+    pos.x,
+    pos.y + 8f,
+    itemEmojiPaint
+  )
+  itemEmojiPaint.textSize = savedSize
+
+  // Room Name & status label
+  val savedTextColor = textPaint.color
+  val savedTextSize = textPaint.textSize
+  textPaint.color = if (isDone) android.graphics.Color.GREEN else android.graphics.Color.CYAN
+  textPaint.textSize = 18f
+  val label = if (isDone) "✅ ${station.roomName}" else "${station.emoji} ${station.roomName}"
+  drawContext.canvas.nativeCanvas.drawText(
+    label,
+    pos.x,
+    pos.y - 36f,
+    textPaint
+  )
+  textPaint.color = savedTextColor
+  textPaint.textSize = savedTextSize
+}
+

@@ -43,7 +43,7 @@ fun ReadyStartScreen(
   onStartNormal: () -> Unit,
   onStartEndless: () -> Unit,
   onStartBots: () -> Unit,
-  onStartCustomBots: (botCount: Int, secretMode: Boolean) -> Unit = { _, _ -> onStartBots() },
+  onStartCustomBots: (botCount: Int, secretMode: Boolean, tasksEnabled: Boolean) -> Unit = { _, _, _ -> onStartBots() },
   onDifficultyChange: (Difficulty) -> Unit,
   onOpenModes: () -> Unit,
   onOpenCreator: () -> Unit,
@@ -837,9 +837,9 @@ fun ReadyStartScreen(
 
     if (showBotsConfigDialog) {
       MenuBotsSetupDialog(
-        onStart = { count, secret ->
+        onStart = { count, secret, tasks ->
           showBotsConfigDialog = false
-          onStartCustomBots(count, secret)
+          onStartCustomBots(count, secret, tasks)
         },
         onDismiss = { showBotsConfigDialog = false }
       )
@@ -849,11 +849,12 @@ fun ReadyStartScreen(
 
 @Composable
 private fun MenuBotsSetupDialog(
-  onStart: (botCount: Int, secretMode: Boolean) -> Unit,
+  onStart: (botCount: Int, secretMode: Boolean, tasksEnabled: Boolean) -> Unit,
   onDismiss: () -> Unit
 ) {
   var botCount by remember { mutableIntStateOf(20) }
   var secretMode by remember { mutableStateOf(false) }
+  var tasksEnabled by remember { mutableStateOf(true) }
 
   Dialog(onDismissRequest = onDismiss) {
     Card(
@@ -992,6 +993,51 @@ private fun MenuBotsSetupDialog(
               )
             }
           }
+
+          if (secretMode) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+              onClick = { tasksEnabled = !tasksEnabled },
+              shape = RoundedCornerShape(12.dp),
+              color = if (tasksEnabled) Color(0xFF064E3B) else Color(0xFF1E293B),
+              border = BorderStroke(
+                width = if (tasksEnabled) 1.5.dp else 1.dp,
+                color = if (tasksEnabled) Color(0xFF10B981) else Color(0xFF475569)
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp)
+                .testTag("menu_bots_tasks_toggle")
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(
+                    text = "📋 Tarefas da Nave (Tasks)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = if (tasksEnabled) Color(0xFF6EE7B7) else Color.White
+                  )
+                  Text(
+                    text = "Mini-jogos nas salas (Fios, Leite, etc). Se morrer, você fica espectando e ainda ajuda!",
+                    fontSize = 10.sp,
+                    color = Color(0xFFCBD5E1)
+                  )
+                }
+                Switch(
+                  checked = tasksEnabled,
+                  onCheckedChange = { tasksEnabled = it },
+                  colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF10B981)
+                  )
+                )
+              }
+            }
+          }
         } else {
           Spacer(modifier = Modifier.height(8.dp))
           Text(
@@ -1004,8 +1050,9 @@ private fun MenuBotsSetupDialog(
         Spacer(modifier = Modifier.height(14.dp))
 
         val effectiveSecret = botCount > 2 && secretMode
+        val effectiveTasks = effectiveSecret && tasksEnabled
         Button(
-          onClick = { onStart(botCount, effectiveSecret) },
+          onClick = { onStart(botCount, effectiveSecret, effectiveTasks) },
           colors = ButtonDefaults.buttonColors(
             containerColor = if (effectiveSecret) Color(0xFFDC2626) else Color(0xFF059669)
           ),

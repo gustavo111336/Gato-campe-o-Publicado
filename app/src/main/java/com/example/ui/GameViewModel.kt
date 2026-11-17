@@ -154,6 +154,11 @@ data class GameUiState(
   val secretKillCooldownSec: Float = 0f,
   val nearestKillTargetUid: String? = null,
   val nearestKillTargetName: String? = null,
+  val isSpectating: Boolean = false,
+  val secretTasksEnabled: Boolean = false,
+  val teamTasksCompletedPercent: Float = 0f,
+  val nearestTaskStation: com.example.model.SecretTaskStationDef? = null,
+  val activeTaskStationDialog: com.example.model.SecretTaskStationDef? = null,
   val roomWinnerUsername: String? = null,
   val notificationFeedback: String? = null,
   // Dialogs
@@ -1098,6 +1103,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
   fun startCustomBotsGame(
     botCount: Int,
     secretMode: Boolean,
+    tasksEnabled: Boolean = true,
     localUsername: String = "Você",
     roomCode: String = ""
   ) {
@@ -1109,6 +1115,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       startMultiplayerBotsGame(
         botCount = safeBots,
         secretMode = effectiveSecret,
+        tasksEnabled = tasksEnabled,
         localUsername = localUsername,
         roomCode = roomCode
       )
@@ -1118,6 +1125,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
   fun startMultiplayerBotsGame(
     botCount: Int,
     secretMode: Boolean,
+    tasksEnabled: Boolean = true,
     localUsername: String,
     roomCode: String
   ) {
@@ -1139,6 +1147,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     )
     startMode(botMode)
 
+    engine.secretTasksEnabled = tasksEnabled && effectiveSecret
+    engine.isSpectating = false
+    engine.teamTasksCompletedPercent = 0f
+
     _uiState.value = _uiState.value.copy(
       activeRoomCode = roomCode.takeIf { it.isNotBlank() } ?: _uiState.value.activeRoomCode,
       isBotSecretMode = engine.isBotSecretMode,
@@ -1146,6 +1158,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
       isPlayerGhost = engine.isPlayerGhost,
       multiplayerRole = if (engine.isPlayerGhost) "ghost" else "cat",
       isLocalPlayerAlive = true,
+      isSpectating = false,
+      secretTasksEnabled = engine.secretTasksEnabled,
+      teamTasksCompletedPercent = 0f,
+      activeTaskStationDialog = null,
       aliveBotsCount = engine.bots.count { it.isAlive },
       botSecretMeetingRoom = null,
       botSecretMeetingPlayers = emptyList()
@@ -1739,6 +1755,31 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     openOnlineDialog(true, OnlineLobbyTab.ROOMS)
   }
 
+  fun openTaskStationDialog(station: com.example.model.SecretTaskStationDef) {
+    _uiState.value = _uiState.value.copy(activeTaskStationDialog = station)
+  }
+
+  fun dismissTaskStationDialog() {
+    _uiState.value = _uiState.value.copy(activeTaskStationDialog = null)
+  }
+
+  fun completeTask(taskId: String) {
+    val done = engine.completeTask(taskId)
+    if (done) {
+      _uiState.value = _uiState.value.copy(
+        activeTaskStationDialog = null,
+        teamTasksCompletedPercent = engine.teamTasksCompletedPercent
+      )
+      audio.playPowerUpSound()
+      audio.vibrateCollect()
+      showTransientFeedback("✅ Tarefa da nave concluída! Progresso: ${(engine.teamTasksCompletedPercent * 100).toInt()}%")
+    }
+  }
+
+  fun leaveSpectatorMatch() {
+    returnToMenu()
+  }
+
   fun exportCloudSavePayload(): CloudSavePayload {
     val st = _uiState.value
     return CloudSavePayload(
@@ -2092,6 +2133,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
           isPlayerGhost = engine.isPlayerGhost,
           isSecretMode = engine.isSecretMode,
           isLocalPlayerAlive = engine.localPlayerAlive,
+          isSpectating = engine.isSpectating,
+          secretTasksEnabled = engine.secretTasksEnabled,
+          teamTasksCompletedPercent = engine.teamTasksCompletedPercent,
+          nearestTaskStation = engine.nearestTaskStation(130f),
           eliminatedUserIds = engine.eliminatedUserIds,
           secretKillCooldownRatio = (engine.secretKillCooldownTimer / engine.secretKillCooldown).coerceIn(0f, 1f),
           secretKillCooldownSec = engine.secretKillCooldownTimer.coerceAtLeast(0f),

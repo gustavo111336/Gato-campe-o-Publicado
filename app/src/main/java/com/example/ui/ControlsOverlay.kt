@@ -49,6 +49,8 @@ fun ControlsOverlay(
   onToggleRecord: () -> Unit = {},
   onReportMeeting: () -> Unit = {},
   onSecretKill: () -> Unit = {},
+  onOpenTask: (com.example.model.SecretTaskStationDef) -> Unit = {},
+  onLeaveSpectator: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   Box(modifier = modifier.fillMaxSize().padding(14.dp)) {
@@ -65,6 +67,16 @@ fun ControlsOverlay(
         onOpenAchievements = onOpenAchievements,
         onOpenAi = onOpenAi
       )
+
+      if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled) {
+        Spacer(modifier = Modifier.height(6.dp))
+        SecretTasksProgressBar(percent = uiState.teamTasksCompletedPercent)
+      }
+
+      if (uiState.isSpectating) {
+        Spacer(modifier = Modifier.height(6.dp))
+        SpectatorBanner(onLeaveSpectator = onLeaveSpectator)
+      }
 
       Spacer(modifier = Modifier.height(8.dp))
 
@@ -181,6 +193,33 @@ fun ControlsOverlay(
                   text = "🚨 Denunciar",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Black,
+                  color = Color.White
+                )
+              }
+            }
+          }
+
+          if ((uiState.isSecretMode || uiState.isBotSecretMode) && uiState.secretTasksEnabled && !uiState.isPlayerGhost) {
+            val station = uiState.nearestTaskStation
+            if (station != null) {
+              val isDone = station.isCompletedByPlayer
+              Button(
+                onClick = { if (!isDone) onOpenTask(station) },
+                enabled = !isDone,
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF059669),
+                  disabledContainerColor = Color(0x99374151)
+                ),
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier
+                  .defaultMinSize(minHeight = 48.dp)
+                  .testTag("secret_task_button")
+              ) {
+                Text(
+                  text = if (isDone) "✅ Concluída (${station.roomName})" else "🔧 ${station.emoji} ${station.name}",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
                   color = Color.White
                 )
               }
@@ -981,3 +1020,115 @@ fun SonicButton(
     }
   }
 }
+
+@Composable
+fun SecretTasksProgressBar(
+  percent: Float,
+  modifier: Modifier = Modifier
+) {
+  val animatedPercent by animateFloatAsState(
+    targetValue = percent.coerceIn(0f, 1f),
+    animationSpec = tween(durationMillis = 350),
+    label = "task_progress"
+  )
+  Surface(
+    color = Color(0xEE0F172A),
+    shape = RoundedCornerShape(12.dp),
+    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF10B981)),
+    modifier = modifier
+      .fillMaxWidth(0.92f)
+      .shadow(4.dp, RoundedCornerShape(12.dp))
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "📋 TAREFAS DA EQUIPE",
+          color = Color(0xFF34D399),
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Black
+        )
+        Text(
+          text = "${(animatedPercent * 100).toInt()}%",
+          color = Color.White,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold
+        )
+      }
+      Spacer(modifier = Modifier.height(4.dp))
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(8.dp)
+          .clip(RoundedCornerShape(4.dp))
+          .background(Color(0xFF1E293B))
+      ) {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth(animatedPercent)
+            .fillMaxHeight()
+            .background(
+              Brush.horizontalGradient(
+                colors = listOf(Color(0xFF059669), Color(0xFF10B981), Color(0xFF34D399))
+              )
+            )
+        )
+      }
+    }
+  }
+}
+
+@Composable
+fun SpectatorBanner(
+  onLeaveSpectator: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Surface(
+    color = Color(0xEE1E1B4B),
+    shape = RoundedCornerShape(14.dp),
+    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF818CF8)),
+    shadowElevation = 8.dp,
+    modifier = modifier.fillMaxWidth(0.92f)
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.weight(1f)
+      ) {
+        Text("👻", fontSize = 20.sp)
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+          Text(
+            text = "MODO ESPECTADOR (ELIMINADO)",
+            color = Color(0xFFFDE047),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black
+          )
+          Text(
+            text = "Voe pelo mapa e faça tarefas para ajudar seu time!",
+            color = Color(0xFFE2E8F0),
+            fontSize = 10.sp
+          )
+        }
+      }
+      Spacer(modifier = Modifier.width(8.dp))
+      Button(
+        onClick = onLeaveSpectator,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        modifier = Modifier.defaultMinSize(minHeight = 36.dp).testTag("leave_spectator_button")
+      ) {
+        Text("🚪 Sair", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+      }
+    }
+  }
+}
+

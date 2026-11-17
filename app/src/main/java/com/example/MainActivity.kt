@@ -366,6 +366,12 @@ class MainActivity : ComponentActivity() {
                     onlineVm?.killSecretVictim(targetUid, targetName)
                   }
                 }
+              },
+              onOpenTask = { station ->
+                viewModel.openTaskStationDialog(station)
+              },
+              onLeaveSpectator = {
+                viewModel.leaveSpectatorMatch()
               }
             )
 
@@ -376,10 +382,11 @@ class MainActivity : ComponentActivity() {
                 onStartNormal = { viewModel.startNormalGame() },
                 onStartEndless = { viewModel.startEndlessGame() },
                 onStartBots = { viewModel.startBotsGame() },
-                onStartCustomBots = { count, secret ->
+                onStartCustomBots = { count, secret, tasks ->
                   viewModel.startCustomBotsGame(
                     botCount = count,
                     secretMode = secret,
+                    tasksEnabled = tasks,
                     localUsername = onlineVm?.suggestedUsername().orEmpty().ifBlank { "Você" }
                   )
                 },
@@ -647,6 +654,19 @@ class MainActivity : ComponentActivity() {
                 onLeaveToLobby = {
                   viewModel.returnToMenu()
                   viewModel.openOnlineDialog(true, OnlineLobbyTab.ROOMS)
+                }
+              )
+            }
+
+            val activeTaskStation = uiState.activeTaskStationDialog
+            if (activeTaskStation != null) {
+              SecretTaskDialog(
+                station = activeTaskStation,
+                onComplete = { taskId ->
+                  viewModel.completeTask(taskId)
+                },
+                onDismiss = {
+                  viewModel.dismissTaskStationDialog()
                 }
               )
             }

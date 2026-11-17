@@ -97,6 +97,12 @@ class GameEngine(
   var isBotSecretMode = false
   var botSecretLocalIsImpostor = false
   var pendingBotMeetingCaller: String? = null
+  var isSpectating = false
+  var secretTasksEnabled = true
+  val secretTaskStations = mutableListOf<SecretTaskStationDef>()
+  var teamTasksCompletedPercent = 0f
+  var totalBotTasksDoneCount = 0
+  private var botTaskWorkTimer = 0f
   private var botReportCooldownTimer = 0f
   private var ghostCaptureCooldownTimer = 0f
   var aiRunnerCat: AiRunnerCat? = null
@@ -213,6 +219,57 @@ class GameEngine(
       remotePlayers.map { it.copy() }
     } else {
       remotePartner?.let { listOf(it.copy()) } ?: emptyList()
+    }
+  }
+
+  fun snapshotSecretTaskStations(): List<SecretTaskStationDef> = synchronized(stateLock) {
+    secretTaskStations.map { it.copy() }
+  }
+
+  fun nearestTaskStation(range: Float = 95f): SecretTaskStationDef? = synchronized(stateLock) {
+    if (!secretTasksEnabled || secretTaskStations.isEmpty()) return null
+    val candidate = secretTaskStations.minByOrNull { (it.position - heroPosition).length() } ?: return null
+    return if ((candidate.position - heroPosition).length() <= range) candidate else null
+  }
+
+  fun completeTask(taskId: String): Boolean = synchronized(stateLock) {
+    val station = secretTaskStations.firstOrNull { it.id == taskId } ?: return false
+    if (station.isCompletedByPlayer) return false
+    station.isCompletedByPlayer = true
+    recalculateTeamTasksProgress()
+    audio?.vibrateCollect()
+    addFloatingTextSafe(
+      FloatingText(
+        text = "✅ Tarefa Concluída: ${station.name}!",
+        position = heroPosition + Vector2D(0f, -40f),
+        color = Color(0xFF10B981),
+        lifetime = 2.5f
+      )
+    )
+    return true
+  }
+
+  fun recalculateTeamTasksProgress() = synchronized(stateLock) {
+    if (!secretTasksEnabled || secretTaskStations.isEmpty()) return
+    val totalStationCount = secretTaskStations.size.coerceAtLeast(1)
+    val playerCompletedCount = secretTaskStations.count { it.isCompletedByPlayer }
+    val targetBotCount = if (isBotSecretMode) bots.count { !it.isSecretImpostor }.coerceAtLeast(1) else 2
+    val totalStepsTarget = (totalStationCount + targetBotCount * 2).toFloat()
+    val totalDone = (playerCompletedCount + totalBotTasksDoneCount).toFloat()
+    teamTasksCompletedPercent = (totalDone / totalStepsTarget).coerceIn(0f, 1f)
+
+    if (teamTasksCompletedPercent >= 1.0f && status == GameStatus.PLAYING) {
+      status = GameStatus.VICTORY
+      winnerBotName = "Tripulação Inocente (Tarefas 100%)"
+      audio?.vibrateVictory()
+      addFloatingTextSafe(
+        FloatingText(
+          text = "🎉 TODAS AS TAREFAS COMPLETAS! A TRIPULAÇÃO VENCEU! 🚀",
+          position = heroPosition + Vector2D(0f, -60f),
+          color = Color(0xFF10B981),
+          lifetime = 4.5f
+        )
+      )
     }
   }
 
@@ -385,8 +442,24 @@ class GameEngine(
     botSecretLocalIsImpostor = isBotSecretMode && impostorSlot == 0
     isSecretMode = isBotSecretMode || (isMultiplayerActive && isSecretMode && !mode.isBotsMode)
     localPlayerAlive = true
+    isSpectating = false
     pendingBotMeetingCaller = null
     botReportCooldownTimer = 0f
+    totalBotTasksDoneCount = 0
+    botTaskWorkTimer = 0f
+    teamTasksCompletedPercent = 0f
+    secretTaskStations.clear()
+    if ((isSecretMode || isBotSecretMode) && secretTasksEnabled) {
+      secretTaskStations.addAll(
+        listOf(
+          SecretTaskStationDef("task_wires", "Painel Elétrico", "Elétrica", "⚡", Vector2D(worldWidth * 0.22f, worldHeight * 0.22f), SecretTaskType.WIRES),
+          SecretTaskStationDef("task_milk", "Estação de Leite", "Cafeteria", "🥛", Vector2D(worldWidth * 0.78f, worldHeight * 0.26f), SecretTaskType.MILK),
+          SecretTaskStationDef("task_download", "Terminal Central", "Comunicações", "💻", Vector2D(worldWidth * 0.50f, worldHeight * 0.50f), SecretTaskType.DOWNLOAD),
+          SecretTaskStationDef("task_filter", "Filtro de Ar", "Armazém", "🧹", Vector2D(worldWidth * 0.25f, worldHeight * 0.78f), SecretTaskType.FILTER),
+          SecretTaskStationDef("task_antenna", "Antena Satélite", "Navegação", "📡", Vector2D(worldWidth * 0.80f, worldHeight * 0.82f), SecretTaskType.ANTENNA)
+        )
+      )
+    }
 
     val ghostPlayerMode = isPlayerGhost
     endlessMode = !ghostPlayerMode && mode.isEndless
@@ -745,8 +818,21 @@ class GameEngine(
 
     var currentSpeed = heroSpeed * heroSpeedMultiplier * currentMode.heroSpeedMult
     if (isPlayerGhost) currentSpeed *= 1.15f
+    if (isSpectating) currentSpeed *= 1.30f
     if (catnipTimer > 0f) currentSpeed *= activeSpeedMult
     if (isDashing) currentSpeed *= 1.9f
+
+    if ((isBotSecretMode || isSecretMode) && secretTasksEnabled && status == GameStatus.PLAYING) {
+      val aliveInnocentBots = bots.count { it.isAlive && !it.isSecretImpostor }
+      if (aliveInnocentBots > 0) {
+        botTaskWorkTimer += safeDelta
+        if (botTaskWorkTimer >= 9.0f) {
+          botTaskWorkTimer = 0f
+          totalBotTasksDoneCount++
+          recalculateTeamTasksProgress()
+        }
+      }
+    }
 
     if (inputDirection.length() > 0.05f) {
       val norm = inputDirection.normalized()
@@ -1076,19 +1162,36 @@ class GameEngine(
         if (huntTargetIsHero && (heroPosition - bot.position).length() < 64f) {
           bot.killCooldownTimer = 12.0f
           localPlayerAlive = false
+          isSpectating = true
           lives = 0
-          winnerBotName = bot.name
-          status = GameStatus.GAME_OVER
           audio?.playGhostHitSound()
           audio?.vibrateGhostHit()
           addFloatingTextSafe(
             FloatingText(
-              text = "🗡️ ${bot.name} era o Impostor e eliminou você!",
+              text = "👻 VOCÊ FOI ELIMINADO! MODO ESPECTADOR ATIVO",
               position = heroPosition + Vector2D(0f, -55f),
               color = Color(0xFFEF4444)
             )
           )
-          break
+          for (i in 0 until 16) {
+            val angle = Random.nextFloat() * 2f * PI.toFloat()
+            val spd = Random.nextFloat() * 160f + 40f
+            addParticleSafe(
+              Particle(
+                position = heroPosition,
+                velocity = Vector2D(cos(angle) * spd, sin(angle) * spd),
+                color = Color(0xFFC084FC),
+                size = 7f,
+                life = 0.7f
+              )
+            )
+          }
+          val aliveInnocents = bots.count { it.isAlive && !it.isSecretImpostor }
+          if (aliveInnocents <= 1) {
+            winnerBotName = bot.name
+            status = GameStatus.GAME_OVER
+            break
+          }
         } else if (huntTargetBot != null && (huntTargetBot.position - bot.position).length() < 68f) {
           bot.killCooldownTimer = 11.5f
           huntTargetBot.isAlive = false
